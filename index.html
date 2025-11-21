@@ -1,0 +1,1248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quest 3 World Explorer</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #111;
+            color: white;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #222; }
+        ::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+
+        #ui-container {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.85);
+            padding: 20px;
+            border-radius: 12px;
+            backdrop-filter: blur(5px);
+            border: 1px solid #333;
+            max-width: 340px;
+            max-height: 90vh;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        h1 {
+            font-size: 18px;
+            margin: 0;
+            color: #4caf50;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        label {
+            font-size: 12px;
+            color: #aaa;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        input[type="text"] {
+            padding: 8px;
+            background: #222;
+            border: 1px solid #444;
+            color: white;
+            border-radius: 4px;
+        }
+        
+        input[type="file"] {
+            display: none;
+        }
+
+        button {
+            background: #333;
+            color: white;
+            border: 1px solid #555;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: bold;
+            font-size: 13px;
+            text-align: center;
+        }
+
+        button:hover {
+            background: #4caf50;
+            border-color: #4caf50;
+            color: black;
+        }
+
+        button.secondary {
+            background: #2d2d2d;
+            border-color: #444;
+        }
+        
+        button.local-file {
+            background: #224444;
+            border-color: #44aaaa;
+        }
+
+        /* Library Styles */
+        .library-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            max-height: 180px;
+            overflow-y: auto;
+            background: #151515;
+            padding: 5px;
+            border-radius: 4px;
+            border: 1px solid #333;
+        }
+
+        .library-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #222;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            border: 1px solid transparent;
+        }
+
+        .library-item:hover {
+            background: #333;
+            border-color: #555;
+        }
+
+        .library-item button.add-btn {
+            padding: 2px 8px;
+            font-size: 16px;
+            line-height: 1;
+            background: transparent;
+            border: none;
+            color: #4caf50;
+        }
+
+        /* Queue Styles */
+        .queue-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            max-height: 150px;
+            overflow-y: auto;
+            background: #151515;
+            border-radius: 4px;
+            border: 1px solid #333;
+        }
+
+        .queue-list li {
+            display: flex;
+            align-items: center;
+            padding: 5px 8px;
+            font-size: 12px;
+            border-bottom: 1px solid #222;
+            background: #1a1a1a;
+        }
+
+        .queue-list li.playing {
+            background: #112211;
+            color: #4caf50;
+            border-left: 3px solid #4caf50;
+        }
+
+        .queue-actions {
+            margin-left: auto;
+            display: flex;
+            gap: 4px;
+        }
+
+        .icon-btn {
+            padding: 2px 6px;
+            font-size: 10px;
+            background: #333;
+            border: 1px solid #444;
+            color: #ccc;
+            border-radius: 3px;
+        }
+        .icon-btn:hover { background: #555; }
+        .btn-del:hover { background: #aa2222; border-color: #ff0000; color: white; }
+
+        .player-controls {
+            display: flex;
+            gap: 5px;
+            margin-top: 5px;
+        }
+
+        .track-name {
+            flex-grow: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-right: 10px;
+            cursor: pointer;
+        }
+
+        #current-track-name {
+            font-size: 11px;
+            color: #2196f3;
+            height: 15px;
+            overflow: hidden;
+            white-space: nowrap;
+            text-align: center;
+        }
+        
+        #loading { display: none; color: #2196f3; font-size: 12px; }
+
+        .instructions {
+            font-size: 11px;
+            color: #888;
+            border-top: 1px solid #333;
+            padding-top: 10px;
+        }
+    </style>
+    <!-- Three.js and Addons -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <div id="ui-container">
+        <h1>World Explorer</h1>
+        
+        <!-- Location Controls -->
+        <div class="control-group">
+            <label>Locations</label>
+            <div style="display:flex; gap:5px;">
+                <button onclick="loadAustin()" style="flex:1; border-left: 3px solid #2196f3;">Austin, TX</button>
+                <button onclick="switchLocation('metro')" style="flex:1">Metro</button>
+                <button onclick="switchLocation('neon')" style="flex:1">Neon</button>
+                <button onclick="switchLocation('mars')" style="flex:1; border: 1px solid #ff4400; color:#ffaa88;">Mars (Sphere)</button>
+            </div>
+            <div style="display:flex; gap:5px;">
+                <input type="text" id="city-input" placeholder="Or search city..." style="flex-grow:1">
+                <button onclick="searchCity()">Go</button>
+            </div>
+            <div id="loading">Loading...</div>
+        </div>
+
+        <!-- Music Library -->
+        <div class="control-group">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <label>GitHub Library (jpalmer95)</label>
+                <button onclick="radio.fetchLibrary()" style="padding:2px 6px; font-size:10px;">↻ Refresh</button>
+            </div>
+            <div id="library-container" class="library-list">
+                <div style="padding:10px; color:#666; text-align:center;">Loading Songs...</div>
+            </div>
+        </div>
+
+        <!-- Queue & Player -->
+        <div class="control-group">
+            <label>Player Queue</label>
+            
+            <input type="file" id="local-music-file" accept="audio/*" multiple onchange="radio.addLocalFiles(this)">
+            <button class="local-file" onclick="document.getElementById('local-music-file').click()">📂 Upload Local MP3s</button>
+            
+            <ul id="queue-list" class="queue-list">
+                <li style="padding:10px; color:#666; text-align:center;">Queue is empty</li>
+            </ul>
+
+            <div id="current-track-name">Not Playing</div>
+            <div class="player-controls">
+                <button style="width:40px" onclick="radio.playPrev()">⏮</button>
+                <button id="btn-playpause" style="flex-grow:1" onclick="radio.toggle()">Play</button>
+                <button style="width:40px" onclick="radio.playNext()">⏭</button>
+            </div>
+        </div>
+
+        <div class="instructions">
+            <strong>Controls:</strong><br>
+            • <strong>Fly:</strong> Hold Triggers<br>
+            • <strong>Boost:</strong> Hold Grip<br>
+            • <strong>Menu:</strong> Left 'X' Button (Toggle)<br>
+            • <strong>Select:</strong> Right Trigger
+        </div>
+    </div>
+
+    <div id="vr-status">Ready for VR</div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { VRButton } from 'three/addons/webxr/VRButton.js';
+        import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+        import { Sky } from 'three/addons/objects/Sky.js';
+
+        // --- Global Variables ---
+        let camera, scene, renderer;
+        let dolly; 
+        let controllers = [];
+        let raycaster; 
+        let laserPointer; // Visual laser
+        
+        // Audio
+        let listener, coinSound;
+        window.radio = null; 
+        window.vrMenu = null;
+
+        // Environment
+        let cityGroup = new THREE.Group();
+        let coinsGroup = new THREE.Group();
+        let propsGroup = new THREE.Group(); 
+        let sky, sun;
+        let starSystem;
+        
+        // HUD
+        let hudTexture, hudMesh;
+
+        // Game State
+        let score = 0;
+        const playerState = {
+            flying: true, 
+            velocity: new THREE.Vector3(),
+            baseSpeed: 15,
+            speedMultiplier: 1.0,
+            turbo: false,
+            height: 1.6,
+            menuOpen: false,
+            isPlanet: false,
+            planetRadius: 2000
+        };
+
+        const buttonStates = { leftStickClick: false, menuButton: false, trigger: false, lastMenuToggle: 0 };
+        const clock = new THREE.Clock();
+        const keyState = {}; 
+
+        // --- VR Menu System ---
+        class VRMenuSystem {
+            constructor(scene, radio) {
+                this.scene = scene;
+                this.radio = radio;
+                
+                this.canvas = document.createElement('canvas');
+                this.canvas.width = 512;
+                this.canvas.height = 512;
+                this.ctx = this.canvas.getContext('2d');
+                this.texture = new THREE.CanvasTexture(this.canvas);
+                
+                const geometry = new THREE.PlaneGeometry(0.8, 0.8);
+                const material = new THREE.MeshBasicMaterial({ map: this.texture, transparent: true, opacity: 0.95, depthTest: false });
+                this.mesh = new THREE.Mesh(geometry, material);
+                this.mesh.renderOrder = 1000;
+                this.mesh.visible = false;
+                this.mesh.name = "VR_MENU";
+                scene.add(this.mesh);
+                
+                // Cursor Visual
+                const cursorGeo = new THREE.SphereGeometry(0.02, 16, 16);
+                const cursorMat = new THREE.MeshBasicMaterial({ color: 0xffff00, depthTest: false });
+                this.cursor = new THREE.Mesh(cursorGeo, cursorMat);
+                this.cursor.visible = false;
+                this.cursor.renderOrder = 1001;
+                scene.add(this.cursor);
+
+                this.options = [
+                    { label: "Location", type: "select", values: ["Metro", "Neon", "Mars", "Austin"], current: 0, y: 120 },
+                    { label: "TRAVEL TO SELECTED", type: "action", action: "warp", y: 170 }, // New Confirm Button
+                    { label: "Speed Gear", type: "slider", min: 1, max: 10, current: 1, y: 230 },
+                    { label: "Toggle Music", type: "action", action: "toggle", y: 290 },
+                    { label: "Next Track", type: "action", action: "next", y: 350 },
+                    { label: "Close Menu", type: "action", action: "close", y: 410 }
+                ];
+                this.hoverIndex = -1;
+                this.cursorX = 0; this.cursorY = 0;
+                this.redraw();
+            }
+
+            toggle() {
+                this.mesh.visible = !this.mesh.visible;
+                this.cursor.visible = false;
+                playerState.menuOpen = this.mesh.visible;
+                
+                // Show/Hide Laser
+                if (laserPointer) laserPointer.visible = this.mesh.visible;
+
+                if(this.mesh.visible) {
+                    // Freeze Physics
+                    playerState.velocity.set(0,0,0);
+
+                    // Spawn 1.5m in front of camera using WORLD COORDINATES
+                    const headPos = new THREE.Vector3();
+                    const headDir = new THREE.Vector3();
+                    
+                    camera.getWorldPosition(headPos);
+                    camera.getWorldDirection(headDir);
+                    
+                    // Flatten y to keep menu upright
+                    headDir.y = 0; 
+                    headDir.normalize().multiplyScalar(1.5);
+                    
+                    const spawnPos = headPos.clone().add(headDir);
+                    this.mesh.position.copy(spawnPos);
+                    this.mesh.lookAt(headPos); // Face the player
+                    
+                    // Sync Slider
+                    const speedOpt = this.options.find(o => o.label === "Speed Gear");
+                    if(speedOpt) speedOpt.current = playerState.speedMultiplier;
+                    
+                    this.redraw();
+                }
+            }
+
+            checkIntersection(controller) {
+                if (!this.mesh.visible) return false;
+
+                // Simple Raycasting from Controller World Pos/Dir
+                const origin = new THREE.Vector3();
+                const direction = new THREE.Vector3();
+                
+                controller.getWorldPosition(origin);
+                // Default controller points -Z
+                const rot = new THREE.Matrix4().extractRotation(controller.matrixWorld);
+                direction.set(0, 0, -1).applyMatrix4(rot).normalize();
+
+                raycaster.set(origin, direction);
+                const intersects = raycaster.intersectObject(this.mesh);
+
+                if (intersects.length > 0) {
+                    this.cursor.visible = true;
+                    this.cursor.position.copy(intersects[0].point);
+
+                    const uv = intersects[0].uv;
+                    const canvasY = (1 - uv.y) * 512;
+                    let newHover = -1;
+                    this.options.forEach((opt, i) => { if (Math.abs(canvasY - opt.y) < 25) newHover = i; });
+                    
+                    if (this.hoverIndex !== newHover) {
+                        this.hoverIndex = newHover;
+                        this.redraw();
+                    }
+                    return true; 
+                } else {
+                    this.cursor.visible = false;
+                    if (this.hoverIndex !== -1) { this.hoverIndex = -1; this.redraw(); }
+                    return false;
+                }
+            }
+
+            click() {
+                if (this.hoverIndex === -1) return;
+                const opt = this.options[this.hoverIndex];
+                if (opt.label === "Location") {
+                    // Cycle options only
+                    opt.current = (opt.current + 1) % opt.values.length;
+                } 
+                else if (opt.label === "TRAVEL TO SELECTED") {
+                    // Apply Location
+                    const locOpt = this.options[0];
+                    const loc = locOpt.values[locOpt.current];
+                    if (loc === "Austin") window.loadAustin(); else window.switchLocation(loc.toLowerCase());
+                    this.toggle(); // Close menu on warp
+                }
+                else if (opt.label === "Speed Gear") {
+                    opt.current++; if(opt.current > opt.max) opt.current = opt.min;
+                    playerState.speedMultiplier = opt.current;
+                }
+                else if (opt.label === "Toggle Music") this.radio.toggle();
+                else if (opt.label === "Next Track") this.radio.playNext();
+                else if (opt.label === "Close Menu") this.toggle();
+                this.redraw();
+            }
+
+            redraw() {
+                const ctx = this.ctx; const w = this.canvas.width; const h = this.canvas.height;
+                ctx.fillStyle = "rgba(15, 15, 25, 0.95)"; ctx.fillRect(0, 0, w, h);
+                ctx.strokeStyle = "#4caf50"; ctx.lineWidth = 8; ctx.strokeRect(4, 4, w-8, h-8);
+                ctx.fillStyle = "#4caf50"; ctx.font = "bold 40px Arial"; ctx.textAlign = "center"; ctx.fillText("SYSTEM MENU", w/2, 60);
+                ctx.font = "30px Arial";
+                this.options.forEach((opt, i) => {
+                    if (i === this.hoverIndex) { ctx.fillStyle = "#226622"; ctx.fillRect(40, opt.y - 35, w - 80, 50); ctx.fillStyle = "#fff"; } else { ctx.fillStyle = "#aaa"; }
+                    let text = opt.label;
+                    if (opt.type === "select") text += `: < ${opt.values[opt.current]} >`;
+                    if (opt.type === "slider") text += `: [ ${opt.current} ]`;
+                    ctx.textAlign = "center"; ctx.fillText(text, w/2, opt.y);
+                });
+                ctx.fillStyle = "#666"; ctx.font = "20px Arial"; ctx.fillText("Pointer & Trigger to Select", w/2, h - 30);
+                this.texture.needsUpdate = true;
+            }
+        }
+
+        // --- Queue-Based Radio System ---
+        class RadioSystem {
+            constructor(listener) {
+                this.listener = listener;
+                this.audioElement = new Audio();
+                this.audioElement.loop = false; 
+                this.audioElement.crossOrigin = "anonymous";
+                this.audioElement.src = ""; 
+                
+                this.sound = new THREE.Audio(listener);
+                this.sound.setMediaElementSource(this.audioElement);
+                this.sound.setVolume(0.5); 
+
+                this.queue = []; 
+                this.currentIndex = -1;
+                this.isPlaying = false;
+
+                // GitHub Repo Config
+                this.githubOwner = "jpalmer95";
+                this.githubRepo = "openmusic";
+
+                this.audioElement.addEventListener('ended', () => this.playNext());
+                this.audioElement.addEventListener('error', () => {
+                    const err = this.audioElement.error;
+                    console.warn("Audio Error (expected if src empty):", err);
+                    if (this.audioElement.src && this.audioElement.src !== window.location.href) {
+                        this.updateStatus("Error - Skipping");
+                        this.isPlaying = false;
+                        this.updatePlayButton();
+                        if (this.queue.length > 0) setTimeout(() => this.playNext(), 1000); 
+                    }
+                });
+                this.audioElement.addEventListener('playing', () => { this.isPlaying = true; this.updatePlayButton(); });
+                this.audioElement.addEventListener('pause', () => { this.isPlaying = false; this.updatePlayButton(); });
+                
+                this.fetchLibrary();
+            }
+
+            async fetchLibrary() {
+                const container = document.getElementById('library-container');
+                container.innerHTML = '<div style="padding:10px; text-align:center; color:#888;">Fetching GitHub...</div>';
+
+                try {
+                    const response = await fetch(`https://api.github.com/repos/${this.githubOwner}/${this.githubRepo}/contents/`);
+                    if (!response.ok) throw new Error("Repo not found or rate limited");
+                    const files = await response.json();
+                    const audioFiles = files.filter(f => f.name.endsWith('.mp3'));
+
+                    container.innerHTML = '';
+                    if (audioFiles.length === 0) {
+                        container.innerHTML = '<div style="padding:10px; text-align:center;">No MP3s found in repo.</div>';
+                        return;
+                    }
+
+                    audioFiles.forEach(file => {
+                        const rawUrl = file.download_url;
+                        const div = document.createElement('div');
+                        div.className = 'library-item';
+                        div.innerHTML = `<span style="overflow:hidden; text-overflow:ellipsis;">${file.name}</span><button class="add-btn">+</button>`;
+                        div.onclick = () => this.addToQueue({ name: file.name, url: rawUrl });
+                        container.appendChild(div);
+                    });
+
+                } catch (e) {
+                    console.error(e);
+                    container.innerHTML = '<div style="padding:10px; color:red; text-align:center;">Error loading library.<br>Check console.</div>';
+                }
+            }
+
+            addToQueue(track) {
+                this.queue.push(track);
+                this.renderQueue();
+                if (this.currentIndex === -1) {
+                    this.currentIndex = 0;
+                    this.loadTrack(0, false);
+                }
+            }
+
+            addLocalFiles(input) {
+                if (!input.files || input.files.length === 0) return;
+                Array.from(input.files).forEach(file => {
+                    this.queue.push({
+                        name: file.name,
+                        url: URL.createObjectURL(file),
+                        isBlob: true
+                    });
+                });
+                this.renderQueue();
+                if (this.currentIndex === -1) {
+                    this.currentIndex = 0;
+                    this.loadTrack(0, false);
+                }
+                input.value = '';
+            }
+
+            removeFromQueue(index) {
+                if (index === this.currentIndex) {
+                    this.audioElement.pause();
+                    this.isPlaying = false;
+                    this.queue.splice(index, 1);
+                    if (this.queue.length === 0) {
+                        this.currentIndex = -1;
+                        this.updateStatus("Queue Empty");
+                    } else {
+                        if (this.currentIndex >= this.queue.length) this.currentIndex = 0;
+                        this.loadTrack(this.currentIndex, false);
+                    }
+                } else {
+                    this.queue.splice(index, 1);
+                    if (index < this.currentIndex) this.currentIndex--;
+                }
+                this.renderQueue();
+                this.updatePlayButton();
+            }
+
+            moveQueueItem(index, direction) {
+                if (direction === -1 && index > 0) {
+                    [this.queue[index], this.queue[index-1]] = [this.queue[index-1], this.queue[index]];
+                    if (this.currentIndex === index) this.currentIndex--;
+                    else if (this.currentIndex === index-1) this.currentIndex++;
+                } 
+                else if (direction === 1 && index < this.queue.length - 1) {
+                    [this.queue[index], this.queue[index+1]] = [this.queue[index+1], this.queue[index]];
+                    if (this.currentIndex === index) this.currentIndex++;
+                    else if (this.currentIndex === index+1) this.currentIndex--;
+                }
+                this.renderQueue();
+            }
+
+            loadTrack(index, autoPlay = true) {
+                if (index < 0 || index >= this.queue.length) return;
+                this.currentIndex = index;
+                const track = this.queue[index];
+                this.audioElement.src = track.url;
+                this.updateStatus(track.name);
+                this.renderQueue(); 
+                if (autoPlay) {
+                    if (this.listener.context.state === 'suspended') this.listener.context.resume();
+                    this.audioElement.play().catch(e => { console.warn("Play interrupted", e); this.updateStatus("Ready"); });
+                }
+            }
+
+            playTrack(index) { this.loadTrack(index, true); }
+            playNext() {
+                if (this.queue.length === 0) return;
+                let next = this.currentIndex + 1;
+                if (next >= this.queue.length) next = 0; 
+                this.playTrack(next);
+            }
+            playPrev() {
+                if (this.queue.length === 0) return;
+                let prev = this.currentIndex - 1;
+                if (prev < 0) prev = this.queue.length - 1;
+                this.playTrack(prev);
+            }
+            toggle() {
+                if (this.queue.length === 0) return;
+                if (this.currentIndex === -1) { this.playTrack(0); return; }
+                if (this.isPlaying) this.audioElement.pause(); else this.audioElement.play();
+            }
+
+            renderQueue() {
+                const list = document.getElementById('queue-list');
+                list.innerHTML = '';
+                if (this.queue.length === 0) {
+                    list.innerHTML = '<li style="padding:10px; color:#666; text-align:center;">Queue is empty</li>';
+                    return;
+                }
+                this.queue.forEach((track, i) => {
+                    const li = document.createElement('li');
+                    if (i === this.currentIndex) li.classList.add('playing');
+                    
+                    const nameSpan = document.createElement('span');
+                    nameSpan.className = 'track-name';
+                    nameSpan.textContent = `${i+1}. ${track.name}`;
+                    nameSpan.onclick = () => this.playTrack(i);
+
+                    const actions = document.createElement('div');
+                    actions.className = 'queue-actions';
+                    actions.innerHTML = `
+                        <button class="icon-btn" onclick="event.stopPropagation(); radio.moveQueueItem(${i}, -1)">↑</button>
+                        <button class="icon-btn" onclick="event.stopPropagation(); radio.moveQueueItem(${i}, 1)">↓</button>
+                        <button class="icon-btn btn-del" onclick="event.stopPropagation(); radio.removeFromQueue(${i})">✖</button>
+                    `;
+                    
+                    li.appendChild(nameSpan);
+                    li.appendChild(actions);
+                    list.appendChild(li);
+                });
+            }
+            updateStatus(text) { const el = document.getElementById('current-track-name'); if(el) el.textContent = text; }
+            updatePlayButton() { const btn = document.getElementById('btn-playpause'); if(btn) btn.innerText = this.isPlaying ? "Pause" : "Play"; }
+        }
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+            scene.fog = new THREE.Fog(0x87CEEB, 0, 300);
+
+            listener = new THREE.AudioListener();
+            dolly = new THREE.Group(); scene.add(dolly);
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 20000); 
+            camera.position.set(0, playerState.height, 0);
+            camera.add(listener); dolly.add(camera);
+
+            raycaster = new THREE.Raycaster();
+            coinSound = new THREE.Audio(listener);
+            generateCoinSound();
+
+            window.radio = new RadioSystem(listener);
+            window.vrMenu = new VRMenuSystem(scene, window.radio);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true; 
+            renderer.shadowMap.enabled = true;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 0.6;
+            document.body.appendChild(renderer.domElement);
+
+            document.body.appendChild(VRButton.createButton(renderer));
+
+            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6); scene.add(hemiLight);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            dirLight.position.set(100, 100, 50); dirLight.castShadow = true;
+            dirLight.shadow.camera.top = 200; dirLight.shadow.camera.bottom = -200;
+            dirLight.shadow.camera.left = -200; dirLight.shadow.camera.right = 200;
+            dirLight.shadow.mapSize.width = 4096; dirLight.shadow.mapSize.height = 4096;
+            scene.add(dirLight);
+
+            initSky(); setupVRControllers(); createHUD();
+            scene.add(cityGroup); scene.add(coinsGroup); scene.add(propsGroup);
+            generateCity('metro');
+
+            document.addEventListener('keydown', (e) => keyState[e.code] = true);
+            document.addEventListener('keyup', (e) => keyState[e.code] = false);
+            document.body.addEventListener('click', () => {
+                if (listener.context.state === 'suspended') listener.context.resume();
+                if(!renderer.xr.isPresenting && document.activeElement.tagName !== 'INPUT') document.body.requestPointerLock();
+            });
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function generateCoinSound() {
+            const audioCtx = listener.context;
+            const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.1, audioCtx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < buffer.length; i++) { const t = i / audioCtx.sampleRate; data[i] = Math.sin(2 * Math.PI * (800 + 400 * t / 0.1) * t) * (1 - t/0.1); }
+            coinSound.setBuffer(buffer); coinSound.setVolume(0.5);
+        }
+
+        // --- City Search Logic ---
+        window.loadAustin = function() {
+            const lat = 30.2672; const lon = -97.7431; const offset = 0.005;
+            document.getElementById('loading').innerText = "Loading Austin, TX...";
+            window.fetchRealCityData(lat - offset, lon - offset, lat + offset, lon + offset, lon, lat);
+        };
+        window.searchCity = async function() {
+            const query = document.getElementById('city-input').value; if(!query) return;
+            const loader = document.getElementById('loading'); loader.style.display = 'block'; loader.innerText = `Searching...`;
+            try {
+                const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`);
+                const geoData = await geoRes.json();
+                if(!geoData || geoData.length === 0) { loader.innerText = "City not found."; return; }
+                const lat = parseFloat(geoData[0].lat); const lon = parseFloat(geoData[0].lon);
+                loader.innerText = `Found: ${geoData[0].display_name}. Loading 3D Data...`;
+                const offset = 0.005;
+                await window.fetchRealCityData(lat - offset, lon - offset, lat + offset, lon + offset, lon, lat);
+            } catch (e) { console.error(e); loader.innerText = "Error connecting to map services."; }
+        };
+        window.fetchRealCityData = async function(s, w, n, e, centerLon, centerLat) {
+            if(!s) { s=40.710; w=-74.010; n=40.715; e=-74.005; centerLon=w; centerLat=s; }
+            const loader = document.getElementById('loading'); loader.style.display = 'block';
+            window.switchLocation('metro'); 
+            while(cityGroup.children.length > 1){ cityGroup.remove(cityGroup.children[1]); }
+            const query = `[out:json];(way["building"](${s},${w},${n},${e}););out body;>;out skel qt;`;
+            try {
+                const response = await fetch('https://overpass-api.de/api/interpreter', {method:'POST', body:query});
+                const data = await response.json();
+                processOSMData(data, centerLon, centerLat);
+                loader.style.display = 'none';
+            } catch (e) { console.error(e); loader.innerText = "Error fetching geometry."; }
+        };
+        function processOSMData(data, originLon, originLat) {
+            const nodes = {}; data.elements.forEach(el => { if(el.type === 'node') nodes[el.id] = [el.lon, el.lat]; });
+            const ways = data.elements.filter(el => el.type === 'way');
+            const mat = new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.4 });
+            let count = 0;
+            ways.forEach(way => {
+                const shapePoints = [];
+                way.nodes.forEach(nodeId => { if(nodes[nodeId]){ const [lon, lat] = nodes[nodeId]; shapePoints.push(new THREE.Vector2((lon - originLon) * 85000, (lat - originLat) * -111000)); } });
+                if(shapePoints.length > 0) {
+                    const shape = new THREE.Shape(shapePoints);
+                    let levels = 3; if (way.tags) { if (way.tags['building:levels']) levels = parseInt(way.tags['building:levels']); else if (way.tags['height']) levels = parseInt(way.tags['height']) / 3; }
+                    const height = Math.max(5, levels * 4 + Math.random() * 2);
+                    const geo = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
+                    geo.rotateX(-Math.PI / 2);
+                    const mesh = new THREE.Mesh(geo, mat);
+                    mesh.position.y = height; mesh.castShadow = true; mesh.receiveShadow = true;
+                    cityGroup.add(mesh); count++;
+                }
+            });
+            spawnCoins();
+            if(count === 0) document.getElementById('loading').innerText = "No buildings found in this area.";
+        }
+
+        function createHUD() {
+            const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 128;
+            hudTexture = new THREE.CanvasTexture(canvas);
+            const geometry = new THREE.PlaneGeometry(0.8, 0.2);
+            const material = new THREE.MeshBasicMaterial({ map: hudTexture, transparent: true, opacity: 0.9, depthTest: false });
+            hudMesh = new THREE.Mesh(geometry, material);
+            hudMesh.position.set(-0.6, -0.5, -1.5); hudMesh.rotation.x = -0.1; hudMesh.rotation.y = 0.2; hudMesh.renderOrder = 999;
+            camera.add(hudMesh); updateHUD();
+        }
+        function updateHUD() {
+            const ctx = hudTexture.image.getContext('2d');
+            const w = hudTexture.image.width; const h = hudTexture.image.height;
+            ctx.clearRect(0, 0, w, h);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)'; ctx.beginPath(); ctx.roundRect(0, 0, w, h, 20); ctx.fill();
+            ctx.strokeStyle = '#4caf50'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(20, h-5); ctx.lineTo(w-20, h-5); ctx.stroke();
+            ctx.fillStyle = '#ffffff'; ctx.font = 'bold 40px Arial'; ctx.textAlign = 'left'; ctx.fillText(`COINS: ${score}`, 30, 70);
+            ctx.textAlign = 'right'; const realSpeed = Math.round(playerState.velocity.length() * 3.6); 
+            ctx.fillStyle = '#2196f3'; ctx.fillText(`${realSpeed} km/h`, w - 30, 70);
+            ctx.font = '20px Arial'; ctx.fillStyle = '#aaaaaa'; ctx.fillText(`THRUSTER LVL: ${playerState.speedMultiplier}`, w - 30, 95);
+            hudTexture.needsUpdate = true;
+        }
+
+        function initSky() {
+            sky = new Sky(); sky.scale.setScalar(450000); scene.add(sky); sun = new THREE.Vector3();
+            const uniforms = sky.material.uniforms; uniforms['turbidity'].value = 10; uniforms['rayleigh'].value = 3; uniforms['mieCoefficient'].value = 0.005; uniforms['mieDirectionalG'].value = 0.7;
+            const phi = THREE.MathUtils.degToRad(90 - 2); const theta = THREE.MathUtils.degToRad(180);
+            sun.setFromSphericalCoords(1, phi, theta); uniforms['sunPosition'].value.copy(sun);
+        }
+
+        function setupVRControllers() {
+            const controllerModelFactory = new XRControllerModelFactory();
+            // DO NOT clear controllers on session start to avoid undefined crashes
+            for (let i = 0; i < 2; i++) {
+                const controller = renderer.xr.getController(i);
+                const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-5)]);
+                const line = new THREE.Line(geometry); line.name = 'line'; line.scale.z = 1;
+                line.visible = false; // Only visible in menu mode
+                controller.add(line); 
+                dolly.add(controller); controllers.push(controller);
+                const grip = renderer.xr.getControllerGrip(i); grip.add(controllerModelFactory.createControllerModel(grip)); dolly.add(grip);
+                controller.addEventListener('connected', (e) => { controller.userData.handedness = e.data.handedness; });
+            }
+        }
+        function getControllerByHandedness(hand) { return controllers.find(c => c.userData && c.userData.handedness === hand); }
+
+        function createGroundTexture(type) {
+            const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = type === 'neon' ? '#050510' : (type === 'mars' ? '#8B4513' : '#222');
+            ctx.fillRect(0,0,512,512);
+            ctx.strokeStyle = type === 'neon' ? '#ff00ff' : '#444';
+            ctx.lineWidth = 2; const step = 64;
+            for(let i=0; i<=512; i+=step){ ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 512); ctx.moveTo(0, i); ctx.lineTo(512, i); ctx.stroke(); }
+            const tex = new THREE.CanvasTexture(canvas); tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(100, 100);
+            return tex;
+        }
+
+        function generateCity(type) {
+            while(cityGroup.children.length > 0) cityGroup.remove(cityGroup.children[0]);
+            while(coinsGroup.children.length > 0) coinsGroup.remove(coinsGroup.children[0]);
+            while(propsGroup.children.length > 0) propsGroup.remove(propsGroup.children[0]);
+            if(starSystem) scene.remove(starSystem);
+            let buildingColors; let density = 150; let isNight = false;
+            playerState.isPlanet = false; // Default to flat map logic
+            
+            if (type === 'metro') { buildingColors = [0xdddddd, 0xaaaaaa, 0x999999, 0xffffff]; sky.visible = true; scene.fog.color.setHex(0xcccccc); scene.fog.far = 300; }
+            else if (type === 'neon') { buildingColors = [0xff00ff, 0x00ffff, 0x3300aa, 0x111111]; sky.visible = false; scene.background = new THREE.Color(0x050510); scene.fog.color.setHex(0x050510); scene.fog.far = 300; isNight = true; createStars(); }
+            else if (type === 'mars') { 
+                // PLANET MODE CONFIG
+                buildingColors = [0x8B4513, 0xA0522D, 0xCD853F]; 
+                sky.visible = false; 
+                scene.background = new THREE.Color(0x000000); // Space background
+                scene.fog.color.setHex(0x8B4513); 
+                scene.fog.far = 2000; // Increase fog far to see stars
+                isNight = true; 
+                createStars(); 
+                playerState.isPlanet = true;
+            }
+            
+            let floor;
+            if(type === 'mars') {
+                // Spherical Ground
+                const floorGeo = new THREE.SphereGeometry(playerState.planetRadius, 128, 128);
+                // Procedural Craters (Vertex Displacement)
+                const pos = floorGeo.attributes.position;
+                const craterCenters = [];
+                for(let i=0; i<20; i++) {
+                    craterCenters.push({
+                        vec: new THREE.Vector3(
+                            (Math.random()-0.5)*2, (Math.random()-0.5)*2, (Math.random()-0.5)*2
+                        ).normalize().multiplyScalar(playerState.planetRadius),
+                        radius: 50 + Math.random() * 100
+                    });
+                }
+                
+                const tempVec = new THREE.Vector3();
+                for(let i=0; i<pos.count; i++){
+                    tempVec.fromBufferAttribute(pos, i);
+                    for(let c of craterCenters) {
+                        const dist = tempVec.distanceTo(c.vec);
+                        if(dist < c.radius) {
+                            // Indent
+                            const factor = Math.cos((dist / c.radius) * Math.PI * 0.5);
+                            tempVec.setLength(playerState.planetRadius - (factor * 30)); 
+                            pos.setXYZ(i, tempVec.x, tempVec.y, tempVec.z);
+                        }
+                    }
+                }
+                
+                const floorMat = new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 0.9 });
+                floor = new THREE.Mesh(floorGeo, floorMat);
+            } else {
+                // Flat Ground
+                const floorGeo = new THREE.PlaneGeometry(2000, 2000); 
+                const floorMat = new THREE.MeshStandardMaterial({ map: createGroundTexture(type), roughness: 0.8 });
+                floor = new THREE.Mesh(floorGeo, floorMat); 
+                floor.rotation.x = -Math.PI / 2; 
+            }
+            
+            floor.receiveShadow = true; 
+            cityGroup.add(floor);
+
+            if (!playerState.isPlanet) {
+                // Standard City Generation
+                const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+                for(let i=0; i<density; i++) {
+                    const color = buildingColors[Math.floor(Math.random() * buildingColors.length)];
+                    const mat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.2, metalness: isNight ? 0.6 : 0.1, emissive: (isNight && Math.random() > 0.7) ? color : 0x000000, emissiveIntensity: 0.8 });
+                    const h = Math.random() * 40 + 5; const w = Math.random() * 10 + 5;
+                    const mesh = new THREE.Mesh(boxGeo, mat);
+                    mesh.position.set((Math.random()-0.5)*600, h/2, (Math.random()-0.5)*600);
+                    mesh.scale.set(w, h, w); mesh.castShadow = true; mesh.receiveShadow = true;
+                    if (Math.abs(mesh.position.x) < 20 && Math.abs(mesh.position.z) < 20) continue;
+                    cityGroup.add(mesh);
+                }
+                spawnProps(type); 
+                spawnCoins();
+            } else {
+                // Planet Object Generation (Distributed on Sphere)
+                // Simplified rocks/bases on Mars
+                const boxGeo = new THREE.BoxGeometry(1,1,1);
+                for(let i=0; i<200; i++) {
+                    const mat = new THREE.MeshStandardMaterial({ color: 0x888888 });
+                    const mesh = new THREE.Mesh(boxGeo, mat);
+                    
+                    // Random point on sphere
+                    const vec = new THREE.Vector3(
+                        (Math.random()-0.5), (Math.random()-0.5), (Math.random()-0.5)
+                    ).normalize().multiplyScalar(playerState.planetRadius);
+                    
+                    mesh.position.copy(vec);
+                    mesh.lookAt(0,0,0); // Point to center
+                    mesh.scale.set(10 + Math.random()*20, 10 + Math.random()*20, 40); // Tall buildings sticking out
+                    cityGroup.add(mesh);
+                }
+            }
+        }
+
+        function spawnProps(type) {
+            if (playerState.isPlanet) return; // Props handled in loop above for Mars
+            const poleGeo = new THREE.CylinderGeometry(0.1, 0.1, 4);
+            const lightGeo = new THREE.SphereGeometry(0.3);
+            const personGeo = new THREE.CapsuleGeometry(0.3, 1, 4, 8);
+            for(let i=0; i<50; i++) {
+                const x = (Math.random()-0.5) * 400; const z = (Math.random()-0.5) * 400;
+                const pole = new THREE.Mesh(poleGeo, new THREE.MeshStandardMaterial({color:0x222222})); pole.position.set(x, 2, z); propsGroup.add(pole);
+                const bulb = new THREE.Mesh(lightGeo, new THREE.MeshBasicMaterial({color: 0xffffaa})); bulb.position.set(0, 2, 0); pole.add(bulb);
+                if(type === 'neon' || type === 'metro') { const pointLight = new THREE.PointLight(0xffffaa, 2, 10); pointLight.position.set(0, 1.5, 0); pole.add(pointLight); }
+                const personMat = new THREE.MeshStandardMaterial({color: Math.random() * 0xffffff});
+                const person = new THREE.Mesh(personGeo, personMat); person.position.set(x + 2, 0.9, z + 2);
+                person.userData = { velocity: new THREE.Vector3((Math.random()-0.5)*2, 0, (Math.random()-0.5)*2), hopOffset: Math.random() * Math.PI };
+                propsGroup.add(person);
+            }
+        }
+
+        function spawnCoins() {
+            const coinGeo = new THREE.TorusGeometry(1, 0.3, 8, 24);
+            const coinMat = new THREE.MeshStandardMaterial({ color: 0xFFD700, metalness: 1, roughness: 0.1, emissive: 0x554400 });
+            for(let i=0; i<30; i++) {
+                const coin = new THREE.Mesh(coinGeo, coinMat); 
+                if (playerState.isPlanet) {
+                     // Global distribution for Mars
+                     const vec = new THREE.Vector3(
+                        (Math.random()-0.5), (Math.random()-0.5), (Math.random()-0.5)
+                     ).normalize().multiplyScalar(playerState.planetRadius + 20 + Math.random()*50);
+                     coin.position.copy(vec);
+                     coin.lookAt(0,0,0);
+                } else {
+                    coin.position.set((Math.random()-0.5)*500, Math.random()*40 + 5, (Math.random()-0.5)*500);
+                }
+                coinsGroup.add(coin);
+            }
+        }
+
+        function createStars() {
+            const geometry = new THREE.BufferGeometry(); const vertices = [];
+            // Increase count and spread for planet view
+            const spread = playerState.isPlanet ? 4000 : 3000;
+            const count = playerState.isPlanet ? 5000 : 3000;
+            
+            for (let i = 0; i < count; i++) { 
+                vertices.push(THREE.MathUtils.randFloatSpread(spread)); 
+                vertices.push(THREE.MathUtils.randFloatSpread(spread)); 
+                vertices.push(THREE.MathUtils.randFloatSpread(spread)); 
+            }
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            starSystem = new THREE.Points(geometry, new THREE.PointsMaterial({ color: 0xFFFFFF, size: 2.0 }));
+            scene.add(starSystem);
+        }
+
+        window.switchLocation = function(type) {
+            generateCity(type);
+            
+            // Reset Velocity completely
+            playerState.velocity.set(0,0,0);
+            
+            // Reset Player Pos
+            if (type === 'mars') {
+                // Start on top of sphere (0, radius, 0)
+                dolly.position.set(0, playerState.planetRadius + 10, 0);
+                // Reset rotation to be upright
+                dolly.rotation.set(0,0,0);
+                dolly.quaternion.identity();
+            } else {
+                dolly.position.set(0, 0, 0);
+                camera.position.set(0, playerState.height, 0);
+                dolly.rotation.set(0,0,0);
+                dolly.quaternion.identity();
+            }
+        };
+
+        function updateGameObjects(dt, time) {
+            const playerPos = dolly.position.clone();
+            // Rough distance check for coins works for both modes
+            for(let i=coinsGroup.children.length-1; i>=0; i--) {
+                const coin = coinsGroup.children[i]; coin.rotation.y += 2 * dt;
+                if(playerPos.distanceTo(coin.position) < 5.0) { // Increased capture radius for VR comfort
+                    coinsGroup.remove(coin); score++;
+                    if(coinSound.isPlaying) coinSound.stop(); coinSound.play();
+                    updateHUD();
+                }
+            }
+            if (!playerState.isPlanet) {
+                propsGroup.children.forEach(prop => {
+                    if(prop.geometry.type === 'CapsuleGeometry') {
+                        prop.position.addScaledVector(prop.userData.velocity, dt);
+                        prop.position.y = 0.9 + Math.abs(Math.sin(time * 5 + prop.userData.hopOffset)) * 0.2;
+                        if(Math.abs(prop.position.x) > 200 || Math.abs(prop.position.z) > 200) prop.userData.velocity.negate();
+                    }
+                });
+            }
+        }
+
+        function updatePhysics(dt) {
+            // 1. Check Menu State First
+            if (playerState.menuOpen) {
+                playerState.velocity.set(0, 0, 0); // Hard Stop
+                handleMenuInput(); // Only process menu interactions
+                return; 
+            }
+
+            // 2. Normal Game Physics
+            const damp = 2.0;
+            const clampLength = 1000; // Max speed 1000 m/s
+            
+            if (playerState.isPlanet) {
+                // --- PLANET PHYSICS ---
+                const planetCenter = new THREE.Vector3(0,0,0);
+                const dist = dolly.position.distanceTo(planetCenter);
+                // Ensure we don't divide by zero if something goes wrong
+                if (dist < 1) { 
+                    dolly.position.set(0, playerState.planetRadius + 10, 0); 
+                    return; 
+                }
+
+                const up = dolly.position.clone().normalize();
+                
+                // 1. Gravity
+                const gravity = up.clone().negate().multiplyScalar(9.8 * dt);
+                playerState.velocity.add(gravity);
+                
+                // 2. Drag (Higher on Mars to prevent runaway speed)
+                playerState.velocity.multiplyScalar(1 - (2.0 * dt)); 
+
+                // 3. Floor Collision
+                const surfaceHeight = playerState.planetRadius + playerState.height;
+                if (dist < surfaceHeight) {
+                    dolly.position.copy(up.multiplyScalar(surfaceHeight));
+                    const vDotNormal = playerState.velocity.dot(up);
+                    if (vDotNormal < 0) {
+                        playerState.velocity.sub(up.multiplyScalar(vDotNormal));
+                    }
+                }
+
+                // 4. Orientation
+                const currentUp = new THREE.Vector3(0, 1, 0).applyQuaternion(dolly.quaternion);
+                const alignmentQ = new THREE.Quaternion().setFromUnitVectors(currentUp, up);
+                // Smooth rotation
+                dolly.quaternion.premultiply(alignmentQ);
+
+            } else {
+                // --- FLAT PHYSICS ---
+                const damp = 2.0;
+                playerState.velocity.x -= playerState.velocity.x * damp * dt;
+                playerState.velocity.z -= playerState.velocity.z * damp * dt;
+                playerState.velocity.y -= playerState.velocity.y * damp * dt;
+                
+                if (playerState.velocity.length() > 1.0) {
+                    const direction = playerState.velocity.clone().normalize();
+                    raycaster.set(dolly.position, direction);
+                    const hits = raycaster.intersectObjects(cityGroup.children);
+                    if (hits.length > 0 && hits[0].distance < 2.0) playerState.velocity.negate().multiplyScalar(0.5);
+                }
+                if(dolly.position.y < 0) { dolly.position.y = 0; playerState.velocity.y = Math.max(0, playerState.velocity.y); }
+            }
+            
+            // Clamp velocity to prevent explosions
+            if (playerState.velocity.length() > clampLength) {
+                playerState.velocity.setLength(clampLength);
+            }
+
+            handleFlightInput(dt); 
+            handleDesktopInput(dt);
+            dolly.position.addScaledVector(playerState.velocity, dt);
+            
+            updateHUD();
+        }
+
+        function handleMenuInput() {
+            const session = renderer.xr.getSession(); if (!session) return;
+            
+            for (const source of session.inputSources) {
+                if (!source.gamepad) continue;
+                const gp = source.gamepad;
+                
+                // Global Toggle Check (Debounced)
+                if (gp.buttons[4]?.pressed || gp.buttons[5]?.pressed) { 
+                    if (!buttonStates.menuButton && (Date.now() - (buttonStates.lastMenuToggle || 0) > 500)) {
+                        window.vrMenu.toggle();
+                        buttonStates.menuButton = true;
+                        buttonStates.lastMenuToggle = Date.now();
+                        return;
+                    }
+                } else buttonStates.menuButton = false;
+
+                // Right Hand Interaction (Index 1 usually)
+                if (source.handedness === 'right') {
+                    // We rely on controller[1] which we setup as right hand visual
+                    // But to be safe, we just use the raycaster attached to it
+                    const controller = getControllerByHandedness('right');
+                    if (controller) {
+                        window.vrMenu.checkIntersection(controller);
+                        if (gp.buttons[0].pressed) { // Trigger
+                            if (!buttonStates.trigger) {
+                                window.vrMenu.click();
+                                buttonStates.trigger = true;
+                            }
+                        } else {
+                            buttonStates.trigger = false;
+                        }
+                    }
+                }
+            }
+        }
+
+        function handleFlightInput(dt) {
+            const session = renderer.xr.getSession(); if (!session) return;
+            
+            for (const source of session.inputSources) {
+                if (!source.gamepad) continue;
+                const gp = source.gamepad;
+                
+                // Toggle Menu Check (Always Active)
+                if (gp.buttons[4]?.pressed || gp.buttons[5]?.pressed) { 
+                    if (!buttonStates.menuButton && (Date.now() - (buttonStates.lastMenuToggle || 0) > 500)) {
+                        window.vrMenu.toggle();
+                        buttonStates.menuButton = true;
+                        buttonStates.lastMenuToggle = Date.now();
+                        return;
+                    }
+                } else buttonStates.menuButton = false;
+
+                // Flight Logic
+                if (source.handedness === 'left') {
+                    if (gp.buttons[3].pressed) { if (!buttonStates.leftStickClick) { playerState.speedMultiplier = playerState.speedMultiplier >= 10 ? 1 : playerState.speedMultiplier + 1; buttonStates.leftStickClick = true; } } else buttonStates.leftStickClick = false;
+                    
+                    const base = playerState.baseSpeed * playerState.speedMultiplier;
+                    const boost = (gp.buttons[1] && gp.buttons[1].pressed) ? 3 : 1; // Left Grip
+                    
+                    if (gp.buttons[0].pressed) {
+                         const controller = getControllerByHandedness('left') || controllers[0]; 
+                         if (controller) {
+                            const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(controller.quaternion).applyQuaternion(dolly.quaternion);
+                            playerState.velocity.addScaledVector(dir, base * boost * 2 * dt);
+                         }
+                    }
+                }
+                
+                if (source.handedness === 'right') {
+                    if (Math.abs(gp.axes[2]) > 0.2) dolly.rotation.y -= gp.axes[2] * 2 * dt;
+                    
+                    const base = playerState.baseSpeed * playerState.speedMultiplier;
+                    const boost = (gp.buttons[1] && gp.buttons[1].pressed) ? 3 : 1; // Right Grip
+                    
+                    if (gp.buttons[0].pressed) {
+                         const controller = getControllerByHandedness('right') || controllers[1]; 
+                         if (controller) {
+                            const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(controller.quaternion).applyQuaternion(dolly.quaternion);
+                            playerState.velocity.addScaledVector(dir, base * boost * 2 * dt);
+                         }
+                    }
+                }
+            }
+        }
+
+        function handleDesktopInput(dt) {
+            if (renderer.xr.isPresenting) return; 
+            const speed = (keyState['ShiftLeft'] ? playerState.baseSpeed * 2 : playerState.baseSpeed) * playerState.speedMultiplier;
+            const front = new THREE.Vector3(); camera.getWorldDirection(front);
+            const right = new THREE.Vector3(); right.crossVectors(front, new THREE.Vector3(0, 1, 0)).normalize();
+            if (keyState['KeyW']) playerState.velocity.addScaledVector(front, speed * dt);
+            if (keyState['KeyS']) playerState.velocity.addScaledVector(front, -speed * dt);
+            if (keyState['KeyD']) playerState.velocity.addScaledVector(right, speed * dt);
+            if (keyState['KeyA']) playerState.velocity.addScaledVector(right, -speed * dt);
+            if (keyState['Space']) playerState.velocity.y += 20 * dt;
+            if (keyState['KeyC'] || keyState['ControlLeft']) playerState.velocity.y -= 20 * dt;
+        }
+
+        function onWindowResize() { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); }
+        function render() { 
+            const dt = Math.min(clock.getDelta(), 0.1); 
+            updateGameObjects(dt, clock.getElapsedTime()); 
+            updatePhysics(dt); 
+            
+            // Update Controller Lasers: Visible in flight, hidden in menu
+            controllers.forEach(c => {
+                const line = c.getObjectByName('line');
+                if(line) line.visible = !playerState.menuOpen;
+            });
+
+            renderer.render(scene, camera); 
+        }
+        function animate() { renderer.setAnimationLoop(render); }
+        
+        init();
+        animate();
+
+    </script>
+</body>
+</html>
