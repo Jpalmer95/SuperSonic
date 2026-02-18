@@ -980,46 +980,98 @@
         }
 
         function updatePhysics(dt, time) {
-             // 1. Menu Safety
-             if(playerState.menuOpen) {
-                 playerState.velocity.set(0,0,0);
-                 handleMenuInput();
-                 return;
-             }
-             
-             // 2. Projectiles & Enemies (Current Logic)
-             for(let i=projectiles.length-1; i>=0; i--) {
-                 const p = projectiles[i];
-                 p.userData.life -= dt;
-                 p.position.add(p.userData.velocity.clone().multiplyScalar(dt));
-                 if(p.userData.life <= 0) {
-                     scene.remove(p);
-                     projectiles.splice(i, 1);
-                     continue;
-                 }
-                 let hit = false;
-                 for(let j=enemiesGroup.children.length-1; j>=0; j--) {
-                     const e = enemiesGroup.children[j];
-                     if (p.position.distanceTo(e.position) < 5) { // Hitbox size
-                         enemiesGroup.remove(e);
-                         if(boomSound.isPlaying) boomSound.stop(); boomSound.play();
-                         kills++;
-                         updateHUD();
-                         hit = true;
-                         break;
-                     }
-                 }
-                 if(hit) {
-                     scene.remove(p);
-                     projectiles.splice(i, 1);
-                 }
-             }
-
-             // 3. Player Physics (Original Logic)
+            // 1. Menu Safety
+            if(playerState.menuOpen) {
+                playerState.velocity.set(0,0,0);
+                handleMenuInput();
+                return;
+            }
+        
+            // *** NEW: GAME OVER SAFETY ***
+            if(playerState.isGameOver) {
+                playerState.velocity.set(0,0,0);
+                return;
+            }
+        
+            // *** NEW: INVULN VISUAL FLASH (red fog pulse) ***
+            if (time < playerState.invulnerableUntil) {
+                const flashIntensity = (Math.sin(time * 20) * 0.5 + 0.5) * 0.8;
+                scene.fog.color.setRGB(1, 0.2 + flashIntensity * 0.3, 0.2 + flashIntensity * 0.3);
+                scene.fog.density = 0.08 + flashIntensity * 0.06;
+            } else {
+                // Reset fog per environment (approximate)
+                scene.fog.density = playerState.isPlanet ? 0.001 : 0.002;
+                scene.fog.color.setHex(playerState.isPlanet ? 0x8B4513 : 0x87CEEB);
+            }
+        
+            // 2. Projectiles & Enemies (Current Logic)
+            for(let i=projectiles.length-1; i>=0; i--) {
+                const p = projectiles[i];
+                p.userData.life -= dt;
+                p.position.add(p.userData.velocity.clone().multiplyScalar(dt));
+                if(p.userData.life <= 0) {
+                    scene.remove(p);
+                    projectiles.splice(i, 1);
+                    continue;
+                }
+                let hit = false;
+                for(let j=enemiesGroup.children.length-1; j>=0; j--) {
+                    const e = enemiesGroup.children[j];
+                    if (p.position.distanceTo(e.position) < 5) { // Hitbox size
+                        enemiesGroup.remove(e);
+                        if(boomSound.isPlaying) boomSound.stop(); boomSound.play();
+                        kills++;
+                        updateHUD();
+                        hit = true;
+                        break;
+                    }
+                }
+                if(hit) {
+                    scene.remove(p);
+                    projectiles.splice(i, 1);
+                }
+            }
+        
+            // *** NEW: ENEMY COLLISION DAMAGE (-2 HP) ***
+            for(let j=enemiesGroup.children.length-1; j>=0; j--) {
+                const e = enemiesGroup.children[j];
+                if (dolly.position.distanceTo(e.position) < 8) {  // Player hitbox
+                    if (time > playerState.invulnerableUntil) {
+                        playerState.health -= 2;
+                        if (crashSound.isPlaying) crashSound.stop();
+                        crashSound.play();
+                        playerState.invulnerableUntil = time + 1.5;
+                        updateHUD();
+                        if (playerState.health <= 0) {
+                            triggerGameOver();
+                            return;
+                        }
+                    }
+                    // Destroy enemy on contact
+                    enemiesGroup.remove(e);
+                }
+            }
+        
+            // 3. Player Physics (Original Logic)
             if (playerState.isPlanet) {
                 const planetCenter = new THREE.Vector3(0,0,0);
                 const dist = dolly.position.distanceTo(planetCenter);
-                if (dist < 1) { dolly.position.set(0, playerState.planetRadius + 10, 0); return; }
+                if (dist < 1) { 
+                    dolly.position.set(0, playerState.planetRadius + 10, 0); 
+                    // *** NEW: TELEPORT DAMAGE ***
+                    if (time > playerState.invulnerableUntil) {
+                        playerState.health--;
+                        if (crashSound.isPlaying) crashSound.stop();
+                        crashSound.play();
+                        playerState.invulnerableUntil = time + 1.0;
+                        updateHUD();
+                        if (playerState.health <= 0) {
+                            triggerGameOver();
+                            return;
+                        }
+                    }
+                    return; 
+                }
                 const up = dolly.position.clone().normalize();
                 const gravity = up.clone().negate().multiplyScalar(9.8 * dt);
                 playerState.velocity.add(gravity);
@@ -1028,7 +1080,21 @@
                 if (dist < surfaceHeight) {
                     dolly.position.copy(up.multiplyScalar(surfaceHeight));
                     const vDotNormal = playerState.velocity.dot(up);
-                    if (vDotNormal < 0) { playerState.velocity.sub(up.multiplyScalar(vDotNormal)); }
+                    if (vDotNormal < 0) { 
+                        playerState.velocity.sub(up.multiplyScalar(vDotNormal));
+                        // *** NEW: PLANET SURFACE CRASH DAMAGE ***
+                        if (time > playerState.invulnerableUntil) {
+                            playerState.health--;
+                            if (crashSound.isPlaying) crashSound.stop();
+                            crashSound.play();
+                            playerState.invulnerableUntil = time + 1.0;
+                            updateHUD();
+                            if (playerState.health <= 0) {
+                                triggerGameOver();
+                                return;
+                            }
+                        }
+                    }
                 }
                 const currentUp = new THREE.Vector3(0, 1, 0).applyQuaternion(dolly.quaternion);
                 const alignmentQ = new THREE.Quaternion().setFromUnitVectors(currentUp, up);
@@ -1042,13 +1108,40 @@
                     const direction = playerState.velocity.clone().normalize();
                     raycaster.set(dolly.position, direction);
                     const hits = raycaster.intersectObjects(cityGroup.children);
-                    if (hits.length > 0 && hits[0].distance < 2.0) playerState.velocity.negate().multiplyScalar(0.5);
+                    if (hits.length > 0 && hits[0].distance < 2.0) {
+                        // *** NEW: BUILDING CRASH DAMAGE (-1 HP) ***
+                        if (time > playerState.invulnerableUntil) {
+                            playerState.health--;
+                            if (crashSound.isPlaying) crashSound.stop();
+                            crashSound.play();
+                            playerState.invulnerableUntil = time + 1.0;
+                            updateHUD();
+                            if (playerState.health <= 0) {
+                                triggerGameOver();
+                                return;
+                            }
+                        }
+                        playerState.velocity.negate().multiplyScalar(0.5);
+                    }
                 }
-                if(dolly.position.y < 0) { dolly.position.y = 0; playerState.velocity.y = Math.max(0, playerState.velocity.y); }
+                if(dolly.position.y < 0) { 
+                    dolly.position.y = 0; 
+                    playerState.velocity.y = Math.max(0, playerState.velocity.y);
+                    // *** NEW: GROUND CRASH DAMAGE (-1 HP) ***
+                    if (time > playerState.invulnerableUntil) {
+                        playerState.health--;
+                        if (crashSound.isPlaying) crashSound.stop();
+                        crashSound.play();
+                        playerState.invulnerableUntil = time + 1.0;
+                        updateHUD();
+                        if (playerState.health <= 0) {
+                            triggerGameOver();
+                            return;
+                        }
+                    }
+                }
             }
-
             if (playerState.velocity.length() > 1000) playerState.velocity.setLength(1000);
-
             handleFlightInput(dt, time);
             handleDesktopInput(dt);
             dolly.position.addScaledVector(playerState.velocity, dt);
