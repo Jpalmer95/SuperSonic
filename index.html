@@ -1202,6 +1202,17 @@
             for (const source of session.inputSources) {
                 if (!source.gamepad) continue;
                 const gp = source.gamepad;
+                // TEMP DEBUG — remove after testing
+                if (gp.buttons[2].pressed && !source.userData.lastClickLogged) {
+                    console.log(`✅ JOYSTICK CLICK on ${source.handedness} controller`);
+                    source.userData.lastClickLogged = true;
+                } else if (!gp.buttons[2].pressed) {
+                    source.userData.lastClickLogged = false;
+                }
+                if (!isLeft && Math.abs(gp.axes[0]) > 0.2) {
+                    console.log(`✅ TURNING right stick: ${gp.axes[0].toFixed(2)}`);
+                }
+                // TEMP DEBUG — remove after testing
                 const isLeft = source.handedness === 'left';
                 const controller = getControllerByHandedness(source.handedness);
         
