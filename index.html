@@ -524,6 +524,72 @@
             }
         }
 
+        // === NEW: VR GAME OVER SCREEN (visible inside headset) ===
+        class VRGameOverSystem {
+            constructor(scene) {
+                this.scene = scene;
+                
+                this.canvas = document.createElement('canvas');
+                this.canvas.width = 512;
+                this.canvas.height = 512;
+                this.ctx = this.canvas.getContext('2d');
+                this.texture = new THREE.CanvasTexture(this.canvas);
+                
+                const geometry = new THREE.PlaneGeometry(1.2, 0.9);
+                const material = new THREE.MeshBasicMaterial({ 
+                    map: this.texture, 
+                    transparent: true, 
+                    opacity: 0.98, 
+                    depthTest: false 
+                });
+                this.mesh = new THREE.Mesh(geometry, material);
+                this.mesh.renderOrder = 2000;
+                this.mesh.visible = false;
+                this.mesh.name = "VR_GAMEOVER";
+                scene.add(this.mesh);
+                
+                this.redraw();
+            }
+        
+            show(score) {
+                this.mesh.visible = true;
+                this.redraw(score);
+                
+                // Position in front of camera
+                const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+                const spawnPos = new THREE.Vector3().copy(camera.position).add(dolly.position).add(forward.multiplyScalar(2));
+                spawnPos.y = camera.position.y + dolly.position.y + 0.2;
+                this.mesh.position.copy(spawnPos);
+                this.mesh.lookAt(camera.position.clone().add(dolly.position));
+                this.mesh.updateMatrixWorld(true);
+            }
+        
+            hide() {
+                this.mesh.visible = false;
+            }
+        
+            redraw(score = 0) {
+                const ctx = this.ctx; const w = this.canvas.width; const h = this.canvas.height;
+                ctx.fillStyle = "rgba(30, 0, 0, 0.95)"; ctx.fillRect(0, 0, w, h);
+                ctx.strokeStyle = "#ff3333"; ctx.lineWidth = 12; ctx.strokeRect(20, 20, w-40, h-40);
+                
+                ctx.fillStyle = "#ff3333"; ctx.font = "bold 52px Arial"; ctx.textAlign = "center";
+                ctx.fillText("SYSTEM FAILURE", w/2, 140);
+                
+                ctx.fillStyle = "#ffff00"; ctx.font = "bold 36px Arial";
+                ctx.fillText(`FINAL SCORE: ${score}`, w/2, 220);
+                
+                ctx.fillStyle = "#ffffff"; ctx.font = "28px Arial";
+                ctx.fillText("PRESS ANY TRIGGER", w/2, 300);
+                ctx.fillText("TO REBOOT SYSTEM", w/2, 340);
+                
+                ctx.fillStyle = "#888888"; ctx.font = "18px Arial";
+                ctx.fillText("or click REBOOT on the floating panel", w/2, 420);
+                
+                this.texture.needsUpdate = true;
+            }
+        }
+
         class RadioSystem {
             constructor(listener) {
                 this.listener = listener;
@@ -1173,7 +1239,23 @@
 
         function handleFlightInput(dt, time) {
             const session = renderer.xr.getSession(); 
-            if (!session || playerState.isGameOver) return;
+            if (!session) return;
+        
+            // NEW: Allow restart on any trigger during game over
+            if (playerState.isGameOver) {
+                for (const source of session.inputSources) {
+                    if (source.gamepad && source.gamepad.buttons[0]?.pressed) {
+                        if (!buttonStates.trigger) {
+                            window.restartGame();
+                            buttonStates.trigger = true;
+                            return;
+                        }
+                    } else {
+                        buttonStates.trigger = false;
+                    }
+                }
+                return; // skip normal flight when dead
+            }
         
             let anyGripPressed = false;
         
@@ -1303,6 +1385,7 @@
                 // Globals
                 window.radio = new RadioSystem(listener);
                 window.vrMenu = new VRMenuSystem(scene, window.radio);
+                window.vrGameOver = new VRGameOverSystem(scene);
 
                 const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6); scene.add(hemiLight);
                 const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
@@ -1350,12 +1433,16 @@
         function triggerGameOver() {
             playerState.isGameOver = true;
             playerState.velocity.set(0,0,0);
-            document.getElementById('final-score').innerText = `Score: ${coins + (kills * 5)}`;
+            
+            const finalScore = coins + (kills * 5);
+            document.getElementById('final-score').innerText = `Score: ${finalScore}`;
             document.getElementById('game-over-screen').style.display = 'flex';
             document.getElementById('ui-container').style.opacity = '0';
             
-            if (laserPointer) laserPointer.visible = true; // helps you see the pointer in VR
-            console.log("%cGAME OVER — Press ANY Trigger to Restart in VR", "color:#ff0000;font-size:16px");
+            // Show the NEW VR overlay inside headset
+            if (window.vrGameOver) window.vrGameOver.show(finalScore);
+            
+            console.log("%cGAME OVER — Press ANY Trigger to Restart in VR", "color:#ff0000;font-size:18px");
         }
         
         window.restartGame = function() {
@@ -1367,14 +1454,16 @@
             document.getElementById('game-over-screen').style.display = 'none';
             document.getElementById('ui-container').style.opacity = '1';
             
-            // Reset player to start
+            if (window.vrGameOver) window.vrGameOver.hide();
+            
+            // Reset player position
             if (playerState.isPlanet) {
                  dolly.position.set(0, playerState.planetRadius + 10, 0);
             } else {
                  dolly.position.set(0,0,0);
             }
             updateHUD();
-        }
+        };
 
         // --- GLOBAL EXPORTS ---
         window.loadAustin = function() {
