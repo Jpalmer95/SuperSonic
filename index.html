@@ -973,6 +973,11 @@
             hudCtx.fillStyle = "#ffff00";
             hudCtx.font = "bold 28px Arial";
             hudCtx.fillText(`GEAR ${playerState.gear}   BOOST ${Math.floor(playerState.boosterFuel)}%`, 256, 95);
+            // TEMP DEBUG - remove after testing
+            hudCtx.fillStyle = "#ffff00";
+            hudCtx.font = "bold 20px Arial";
+            hudCtx.fillText(`DEBUG BTNS: ${Array.from({length:6}, (_,i)=> gp ? (gp.buttons[i]?.pressed ? i : '') : '').filter(Boolean).join(',')}`, 10, 120);
+            // TEMP DEBUG - remove after testing
             if (hudTexture) hudTexture.needsUpdate = true;
         }
 
@@ -1170,25 +1175,30 @@
         }
 
         function handleMenuInput() {
-            const session = renderer.xr.getSession(); if (!session || !playerState.menuOpen) return;
+            const session = renderer.xr.getSession(); 
+            if (!session || !playerState.menuOpen) return;
             for (const source of session.inputSources) {
                 if (!source.gamepad || source.handedness !== 'right') continue;
                 const gp = source.gamepad;
                 const controller = getControllerByHandedness('right');
                 if (controller) {
                     window.vrMenu.checkIntersection(controller);
-                    if (gp.buttons[0].pressed) { // Right trigger to select
+                    if (gp.buttons[0].pressed) { // Right trigger to select in menu
                         if (!buttonStates.trigger) {
                             window.vrMenu.click();
                             buttonStates.trigger = true;
                         }
-                    } else buttonStates.trigger = false;
+                    } else {
+                        buttonStates.trigger = false;
+                    }
                 }
             }
         }
 
         function handleFlightInput(dt, time) {
-            const session = renderer.xr.getSession(); if (!session || playerState.isGameOver) return;
+            const session = renderer.xr.getSession(); 
+            if (!session || playerState.isGameOver) return;
+        
             let anyGripPressed = false;
         
             for (const source of session.inputSources) {
@@ -1197,7 +1207,7 @@
                 const isLeft = source.handedness === 'left';
                 const controller = getControllerByHandedness(source.handedness);
         
-                // MENU: B / Y (index 4)
+                // === MENU: B / Y (buttons[4]) ===
                 if (gp.buttons[4]?.pressed) {
                     if (!buttonStates.menuButton && (Date.now() - buttonStates.lastMenuToggle > 400)) {
                         window.vrMenu.toggle();
@@ -1207,7 +1217,7 @@
                     }
                 } else buttonStates.menuButton = false;
         
-                // SHOOT: A / X (index 3)
+                // === SHOOT: A / X (buttons[3]) ===
                 if (gp.buttons[3]?.pressed && !playerState.menuOpen) {
                     if (controller && (!controller.userData.lastFire || time - controller.userData.lastFire > 0.15)) {
                         spawnProjectile(controller);
@@ -1215,19 +1225,22 @@
                     }
                 }
         
-                // GEAR SHIFT: Joystick clicks (index 2)
+                // === GEAR SHIFT: Joystick clicks (buttons[2]) ===
                 if (gp.buttons[2]?.pressed && (time - playerState.lastGearShift > 0.25)) {
-                    if (isLeft) playerState.gear = Math.max(1, playerState.gear - 1);
-                    else playerState.gear = Math.min(playerState.maxGear, playerState.gear + 1);
+                    if (isLeft) {
+                        playerState.gear = Math.max(1, playerState.gear - 1);
+                    } else {
+                        playerState.gear = Math.min(playerState.maxGear, playerState.gear + 1);
+                    }
                     playerState.lastGearShift = time;
                 }
         
-                // TURNING: Right joystick horizontal (axes[0])
+                // === TURNING: Right joystick left/right (axes[0]) ===
                 if (!isLeft && Math.abs(gp.axes[0]) > 0.15) {
-                    dolly.rotation.y -= gp.axes[0] * 2.8 * dt;   // feel free to tweak 2.8
+                    dolly.rotation.y -= gp.axes[0] * 3.5 * dt;   // very responsive turning
                 }
         
-                // THRUST (unchanged)
+                // === THRUST: Triggers (buttons[0]) ===
                 if (gp.buttons[0]?.pressed) {
                     let boost = 1;
                     if (gp.buttons[1]?.pressed && playerState.boosterFuel > 5) {
@@ -1242,7 +1255,7 @@
                 }
             }
         
-            // Booster fuel
+            // Booster fuel management
             if (anyGripPressed) {
                 playerState.boosterFuel -= playerState.boosterDrainRate * dt;
                 if (playerState.boosterFuel < 0) playerState.boosterFuel = 0;
