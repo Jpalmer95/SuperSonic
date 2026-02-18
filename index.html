@@ -304,11 +304,12 @@
         </div>
 
         <div class="instructions">
-            <strong>Controls:</strong><br>
-            • <strong>Fly:</strong> Hold Triggers (Point controller to fly)<br>
-            • <strong>Shoot:</strong> Y Button / B Button (Buttons 4/5)<br>
-            • <strong>Boost:</strong> Hold Grip<br>
-            • <strong>Menu:</strong> Left 'X' Button or Menu<br>
+            <strong>Controls (Quest 3):</strong><br>
+            • <strong>Fly:</strong> Hold Triggers (point controllers)<br>
+            • <strong>Shoot:</strong> A / X buttons<br>
+            • <strong>Boost:</strong> Hold Grip (limited fuel – recharges)<br>
+            • <strong>Gear:</strong> L-joystick click = downshift / R-joystick click = upshift (1-10)<br>
+            • <strong>Menu:</strong> B / Y buttons (settings, music, levels)
         </div>
     </div>
     
@@ -378,7 +379,14 @@
             health: 5,
             maxHealth: 5,
             invulnerableUntil: 0,
-            isGameOver: false
+            isGameOver: false,
+            gear: 5,
+            maxGear: 10,
+            lastGearShift: 0,
+            boosterFuel: 100,
+            maxBoosterFuel: 100,
+            boosterDrainRate: 35,   // % per second when boosting
+            boosterRechargeRate: 18 // % per second when not boosting
         };
 
         const buttonStates = { leftStickClick: false, menuButton: false, trigger: false, lastMenuToggle: 0 };
@@ -934,15 +942,18 @@
         }
 
         function updateHUD() {
-            if(!hudCtx) return;
-            hudCtx.clearRect(0,0,512,128);
-            hudCtx.fillStyle = "rgba(0,0,0,0.5)";
-            hudCtx.fillRect(0,0,512,128);
-            hudCtx.font = "bold 40px Arial";
+            if (!hudCtx) return;
+            hudCtx.clearRect(0, 0, 512, 128);
+            hudCtx.fillStyle = "rgba(0,0,0,0.6)";
+            hudCtx.fillRect(0, 0, 512, 128);
+            hudCtx.font = "bold 36px Arial";
             hudCtx.fillStyle = "#00ff00";
             hudCtx.textAlign = "center";
-            hudCtx.fillText(`Coins: ${coins}   Kills: ${kills}   HP: ${playerState.health}`, 256, 80);
-            if(hudTexture) hudTexture.needsUpdate = true;
+            hudCtx.fillText(`Coins: ${coins}  Kills: ${kills}  HP: ${playerState.health}`, 256, 55);
+            hudCtx.font = "bold 28px Arial";
+            hudCtx.fillStyle = "#ffff00";
+            hudCtx.fillText(`GEAR ${playerState.gear}   BOOST ${Math.floor(playerState.boosterFuel)}%`, 256, 95);
+            if (hudTexture) hudTexture.needsUpdate = true;
         }
 
         function updateGameObjects(dt, time) {
@@ -1079,54 +1090,72 @@
 
         function handleFlightInput(dt, time) {
             const session = renderer.xr.getSession(); if (!session) return;
+            
+            let anyGripPressed = false;
+        
             for (const source of session.inputSources) {
                 if (!source.gamepad) continue;
                 const gp = source.gamepad;
-
-                // Toggle Menu Check (Always Active)
-                if (gp.buttons[3]?.pressed) { 
-                    if (!buttonStates.menuButton && (Date.now() - (buttonStates.lastMenuToggle || 0) > 500)) {
+                const isLeft = source.handedness === 'left';
+                const controller = getControllerByHandedness(source.handedness);
+        
+                // === SHOOTING (A / X = buttons[3]) ===
+                if (gp.buttons[3]?.pressed && !playerState.menuOpen) {
+                    if (controller && (!controller.userData.lastFire || time - controller.userData.lastFire > 0.15)) {
+                        spawnProjectile(controller);
+                        controller.userData.lastFire = time;
+                    }
+                }
+        
+                // === MENU (B / Y = buttons[4]) ===
+                if (gp.buttons[4]?.pressed) {
+                    if (!buttonStates.menuButton && (Date.now() - buttonStates.lastMenuToggle > 500)) {
                         window.vrMenu.toggle();
                         buttonStates.menuButton = true;
                         buttonStates.lastMenuToggle = Date.now();
-                        return;
                     }
-                } else buttonStates.menuButton = false;
-
-                // Shooting Check (Button 4/5 - A/B/X/Y)
-                if ((gp.buttons[4]?.pressed || gp.buttons[5]?.pressed) && !playerState.menuOpen) {
-                     const controller = getControllerByHandedness(source.handedness);
-                     if (controller && (!controller.userData.lastFire || time - controller.userData.lastFire > 0.2)) {
-                         spawnProjectile(controller);
-                         controller.userData.lastFire = time;
-                     }
+                } else {
+                    buttonStates.menuButton = false;
                 }
-
-                // Flight Logic
-                if (source.handedness === 'left') {
-                    if (gp.buttons[0].pressed) {
-                         const controller = getControllerByHandedness('left') || controllers[0]; 
-                         if (controller) {
-                            const boost = (gp.buttons[1] && gp.buttons[1].pressed) ? 3 : 1;
-                            const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(controller.quaternion).applyQuaternion(dolly.quaternion);
-                            playerState.velocity.addScaledVector(dir, playerState.baseSpeed * playerState.speedMultiplier * boost * 2 * dt);
-                         }
+        
+                // === GEAR SHIFT (joystick click = buttons[2]) ===
+                if (gp.buttons[2]?.pressed && (time - playerState.lastGearShift > 0.3)) {
+                    if (isLeft) {
+                        playerState.gear = Math.max(1, playerState.gear - 1);
+                    } else {
+                        playerState.gear = Math.min(playerState.maxGear, playerState.gear + 1);
                     }
+                    playerState.lastGearShift = time;
+                    // Optional haptic feedback (if you want to add later)
                 }
-                if (source.handedness === 'right') {
-                    if (Math.abs(gp.axes[2]) > 0.2) dolly.rotation.y -= gp.axes[2] * 2 * dt;
-                    if (gp.buttons[0].pressed) {
-                         const controller = getControllerByHandedness('right') || controllers[1]; 
-                         if (controller) {
-                            const boost = (gp.buttons[1] && gp.buttons[1].pressed) ? 3 : 1;
-                            const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(controller.quaternion).applyQuaternion(dolly.quaternion);
-                            playerState.velocity.addScaledVector(dir, playerState.baseSpeed * playerState.speedMultiplier * boost * 2 * dt);
-                         }
+        
+                // === FLIGHT THRUST (unchanged logic + new gear + limited boost) ===
+                if (gp.buttons[0]?.pressed) { // Trigger
+                    let boost = 1;
+                    if (gp.buttons[1]?.pressed && playerState.boosterFuel > 5) {
+                        boost = 3.8;
+                        anyGripPressed = true;
                     }
+                    const dir = new THREE.Vector3(0, 0, -1)
+                        .applyQuaternion(controller ? controller.quaternion : dolly.quaternion)
+                        .applyQuaternion(dolly.quaternion);
+                    
+                    playerState.velocity.addScaledVector(
+                        dir,
+                        playerState.baseSpeed * playerState.gear * 0.65 * boost * dt
+                    );
                 }
             }
+        
+            // === BOOST FUEL MANAGEMENT (global per frame) ===
+            if (anyGripPressed) {
+                playerState.boosterFuel -= playerState.boosterDrainRate * dt;
+                if (playerState.boosterFuel < 0) playerState.boosterFuel = 0;
+            } else {
+                playerState.boosterFuel += playerState.boosterRechargeRate * dt;
+                if (playerState.boosterFuel > playerState.maxBoosterFuel) playerState.boosterFuel = playerState.maxBoosterFuel;
+            }
         }
-
         function handleDesktopInput(dt) {
             if (renderer.xr.isPresenting) return; 
             const speed = (keyState['ShiftLeft'] ? playerState.baseSpeed * 2 : playerState.baseSpeed) * playerState.speedMultiplier;
