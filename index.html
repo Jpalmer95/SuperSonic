@@ -396,84 +396,63 @@
         // --- Classes ---
 
         class VRMenuSystem {
-    constructor(scene, radio) {
-        this.scene = scene;
-        this.radio = radio;
+            constructor(scene, radio) {
+                this.scene = scene;
+                this.radio = radio;
+                
+                this.canvas = document.createElement('canvas');
+                this.canvas.width = 512; this.canvas.height = 512;
+                this.ctx = this.canvas.getContext('2d');
+                this.texture = new THREE.CanvasTexture(this.canvas);
+                
+                const geometry = new THREE.PlaneGeometry(0.8, 0.8);
+                const material = new THREE.MeshBasicMaterial({ map: this.texture, transparent: true, opacity: 0.95, depthTest: false });
+                this.mesh = new THREE.Mesh(geometry, material);
+                this.mesh.renderOrder = 1000;
+                this.mesh.visible = false;
+                this.mesh.name = "VR_MENU";
+                scene.add(this.mesh);
+                
+                const cursorGeo = new THREE.SphereGeometry(0.02, 16, 16);
+                const cursorMat = new THREE.MeshBasicMaterial({ color: 0xffff00, depthTest: false });
+                this.cursor = new THREE.Mesh(cursorGeo, cursorMat);
+                this.cursor.visible = false;
+                this.cursor.renderOrder = 1001;
+                scene.add(this.cursor);
         
-        this.canvas = document.createElement('canvas');
-        this.canvas.width = 512; this.canvas.height = 512;
-        this.ctx = this.canvas.getContext('2d');
-        this.texture = new THREE.CanvasTexture(this.canvas);
+                this.options = [
+                    { label: "Location", type: "select", values: ["Metro", "Neon", "Mars", "Austin"], current: 0, y: 120 },
+                    { label: "TRAVEL TO SELECTED", type: "action", action: "warp", y: 170 },
+                    { label: "Speed Gear", type: "slider", min: 1, max: 10, current: 5, y: 230 },
+                    { label: "Toggle Music", type: "action", action: "toggle", y: 290 },
+                    { label: "Next Track", type: "action", action: "next", y: 350 },
+                    { label: "Close Menu", type: "action", action: "close", y: 410 }
+                ];
+                this.hoverIndex = -1;
+                this.redraw();
+            }
         
-        const geometry = new THREE.PlaneGeometry(0.8, 0.8);
-        const material = new THREE.MeshBasicMaterial({ map: this.texture, transparent: true, opacity: 0.95, depthTest: false });
-        this.mesh = new THREE.Mesh(geometry, material);
-        this.mesh.renderOrder = 1000;
-        this.mesh.visible = false;
-        this.mesh.name = "VR_MENU";
-        scene.add(this.mesh);
-        
-        const cursorGeo = new THREE.SphereGeometry(0.02, 16, 16);
-        const cursorMat = new THREE.MeshBasicMaterial({ color: 0xffff00, depthTest: false });
-        this.cursor = new THREE.Mesh(cursorGeo, cursorMat);
-        this.cursor.visible = false;
-        this.cursor.renderOrder = 1001;
-        scene.add(this.cursor);
-
-        this.options = [
-            { label: "Location", type: "select", values: ["Metro", "Neon", "Mars", "Austin"], current: 0, y: 120 },
-            { label: "TRAVEL TO SELECTED", type: "action", action: "warp", y: 170 },
-            { label: "Speed Gear", type: "slider", min: 1, max: 10, current: 5, y: 230 },
-            { label: "Toggle Music", type: "action", action: "toggle", y: 290 },
-            { label: "Next Track", type: "action", action: "next", y: 350 },
-            { label: "Close Menu", type: "action", action: "close", y: 410 }
-        ];
-        this.hoverIndex = -1;
-        this.redraw();
-    }
-
-    toggle() {
-        if (playerState.isGameOver) return;
-        this.mesh.visible = !this.mesh.visible;
-        this.cursor.visible = this.mesh.visible;
-        playerState.menuOpen = this.mesh.visible;
-        if (laserPointer) laserPointer.visible = this.mesh.visible;
-
-        if(this.mesh.visible) {
-            playerState.velocity.set(0,0,0);
-            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-            forward.y = 0; forward.normalize().multiplyScalar(1.5);
-            const spawnPos = new THREE.Vector3().copy(camera.position).add(dolly.position).add(forward);
-            spawnPos.y = camera.position.y + dolly.position.y;
-            this.mesh.position.copy(spawnPos);
-            this.mesh.lookAt(camera.position.clone().add(dolly.position));
-            this.options[2].current = playerState.gear;   // <-- fixed to real gear
-            this.mesh.updateMatrixWorld(true);
-            this.redraw();
-        }
-    }
-
             toggle() {
                 if (playerState.isGameOver) return;
                 this.mesh.visible = !this.mesh.visible;
-                this.cursor.visible = false;
+                this.cursor.visible = this.mesh.visible;
                 playerState.menuOpen = this.mesh.visible;
-                
                 if (laserPointer) laserPointer.visible = this.mesh.visible;
-
+        
                 if(this.mesh.visible) {
                     playerState.velocity.set(0,0,0);
                     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
                     forward.y = 0; forward.normalize().multiplyScalar(1.5);
                     const spawnPos = new THREE.Vector3().copy(camera.position).add(dolly.position).add(forward);
-                    spawnPos.y = camera.position.y + dolly.position.y; 
+                    spawnPos.y = camera.position.y + dolly.position.y;
                     this.mesh.position.copy(spawnPos);
                     this.mesh.lookAt(camera.position.clone().add(dolly.position));
-                    this.options[2].current = playerState.gear;
-                    this.mesh.updateMatrixWorld(true); 
+                    this.options[2].current = playerState.gear;   // <-- fixed to real gear
+                    this.mesh.updateMatrixWorld(true);
                     this.redraw();
                 }
             }
+
 
             checkIntersection(controller) {
                 if (!this.mesh.visible) return false;
@@ -1205,8 +1184,8 @@
                 const isLeft = source.handedness === 'left';
                 const controller = getControllerByHandedness(source.handedness);
         
-                // === MENU: B / Y (buttons[4]) ===
-                if (gp.buttons[2]?.pressed) {
+                // === MENU: B / Y (index 5) ===
+                if (gp.buttons[5]?.pressed) {
                     if (!buttonStates.menuButton && (Date.now() - buttonStates.lastMenuToggle > 400)) {
                         window.vrMenu.toggle();
                         buttonStates.menuButton = true;
@@ -1215,7 +1194,7 @@
                     }
                 } else buttonStates.menuButton = false;
         
-                // === SHOOT: A / X (buttons[3]) ===
+                // === SHOOT: A / X (index 4) ===
                 if (gp.buttons[4]?.pressed && !playerState.menuOpen) {
                     if (controller && (!controller.userData.lastFire || time - controller.userData.lastFire > 0.15)) {
                         spawnProjectile(controller);
@@ -1223,8 +1202,9 @@
                     }
                 }
         
-                // === GEAR SHIFT: Joystick clicks (buttons[4]?) ===
+                // === GEAR SHIFT: Joystick clicks (index 3) ===
                 if (gp.buttons[3]?.pressed && (time - playerState.lastGearShift > 0.25)) {
+                    console.log(`✅ GEAR SHIFT → ${isLeft ? 'DOWN' : 'UP'} to gear ${isLeft ? playerState.gear-1 : playerState.gear+1}`);
                     if (isLeft) {
                         playerState.gear = Math.max(1, playerState.gear - 1);
                     } else {
@@ -1233,12 +1213,13 @@
                     playerState.lastGearShift = time;
                 }
         
-                // === TURNING: Right joystick left/right (axes[2]) ===
-                if (!isLeft && Math.abs(gp.axes[2]) > 0.15) {
-                    dolly.rotation.y -= gp.axes[2] * 2.5 * dt;   // very responsive turning
+                // === TURNING: Right joystick (axes[2]) ===
+                if (Math.abs(gp.axes[2]) > 0.15) {
+                    console.log(`✅ TURNING: ${gp.axes[2].toFixed(2)}`);
+                    dolly.rotation.y -= gp.axes[2] * 2 * dt;   // smooth & responsive
                 }
         
-                // === THRUST: Triggers (buttons[0]) ===
+                // === THRUST: Triggers (index 0) ===
                 if (gp.buttons[0]?.pressed) {
                     let boost = 1;
                     if (gp.buttons[1]?.pressed && playerState.boosterFuel > 5) {
@@ -1253,7 +1234,7 @@
                 }
             }
         
-            // Booster fuel management
+            // Booster fuel
             if (anyGripPressed) {
                 playerState.boosterFuel -= playerState.boosterDrainRate * dt;
                 if (playerState.boosterFuel < 0) playerState.boosterFuel = 0;
