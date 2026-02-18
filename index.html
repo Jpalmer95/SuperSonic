@@ -1202,22 +1202,11 @@
             for (const source of session.inputSources) {
                 if (!source.gamepad) continue;
                 const gp = source.gamepad;
-                // TEMP DEBUG — remove after testing
-                if (gp.buttons[2].pressed && !source.userData.lastClickLogged) {
-                    console.log(`✅ JOYSTICK CLICK on ${source.handedness} controller`);
-                    source.userData.lastClickLogged = true;
-                } else if (!gp.buttons[2].pressed) {
-                    source.userData.lastClickLogged = false;
-                }
-                if (!isLeft && Math.abs(gp.axes[0]) > 0.2) {
-                    console.log(`✅ TURNING right stick: ${gp.axes[0].toFixed(2)}`);
-                }
-                // TEMP DEBUG — remove after testing
                 const isLeft = source.handedness === 'left';
                 const controller = getControllerByHandedness(source.handedness);
         
                 // === MENU: B / Y (buttons[4]) ===
-                if (gp.buttons[4]?.pressed) {
+                if (gp.buttons[3]?.pressed) {
                     if (!buttonStates.menuButton && (Date.now() - buttonStates.lastMenuToggle > 400)) {
                         window.vrMenu.toggle();
                         buttonStates.menuButton = true;
@@ -1227,15 +1216,15 @@
                 } else buttonStates.menuButton = false;
         
                 // === SHOOT: A / X (buttons[3]) ===
-                if (gp.buttons[3]?.pressed && !playerState.menuOpen) {
+                if (gp.buttons[2]?.pressed && !playerState.menuOpen) {
                     if (controller && (!controller.userData.lastFire || time - controller.userData.lastFire > 0.15)) {
                         spawnProjectile(controller);
                         controller.userData.lastFire = time;
                     }
                 }
         
-                // === GEAR SHIFT: Joystick clicks (buttons[2]) ===
-                if (gp.buttons[2]?.pressed && (time - playerState.lastGearShift > 0.25)) {
+                // === GEAR SHIFT: Joystick clicks (buttons[4]?) ===
+                if (gp.buttons[4]?.pressed && (time - playerState.lastGearShift > 0.25)) {
                     if (isLeft) {
                         playerState.gear = Math.max(1, playerState.gear - 1);
                     } else {
@@ -1244,9 +1233,9 @@
                     playerState.lastGearShift = time;
                 }
         
-                // === TURNING: Right joystick left/right (axes[0]) ===
-                if (!isLeft && Math.abs(gp.axes[0]) > 0.15) {
-                    dolly.rotation.y -= gp.axes[0] * 3.5 * dt;   // very responsive turning
+                // === TURNING: Right joystick left/right (axes[2]) ===
+                if (!isLeft && Math.abs(gp.axes[2]) > 0.15) {
+                    dolly.rotation.y -= gp.axes[2] * 3.5 * dt;   // very responsive turning
                 }
         
                 // === THRUST: Triggers (buttons[0]) ===
