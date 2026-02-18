@@ -1241,7 +1241,23 @@
             const session = renderer.xr.getSession(); 
             if (!session) return;
         
-            // NEW: Allow restart on any trigger during game over
+            // === MENU TOGGLE: B / Y (index 5) - ALWAYS ACTIVE (open OR close) ===
+            for (const source of session.inputSources) {
+                if (!source.gamepad) continue;
+                const gp = source.gamepad;
+                if (gp.buttons[5]?.pressed) {
+                    if (!buttonStates.menuButton && (Date.now() - buttonStates.lastMenuToggle > 400)) {
+                        window.vrMenu.toggle();
+                        buttonStates.menuButton = true;
+                        buttonStates.lastMenuToggle = Date.now();
+                        // Do not return here - we still want to process other inputs if needed
+                    }
+                } else {
+                    buttonStates.menuButton = false;
+                }
+            }
+        
+            // Game Over restart (any trigger)
             if (playerState.isGameOver) {
                 for (const source of session.inputSources) {
                     if (source.gamepad && source.gamepad.buttons[0]?.pressed) {
@@ -1254,7 +1270,7 @@
                         buttonStates.trigger = false;
                     }
                 }
-                return; // skip normal flight when dead
+                return;
             }
         
             let anyGripPressed = false;
@@ -1265,17 +1281,7 @@
                 const isLeft = source.handedness === 'left';
                 const controller = getControllerByHandedness(source.handedness);
         
-                // === MENU: B / Y (index 5) ===
-                if (gp.buttons[5]?.pressed) {
-                    if (!buttonStates.menuButton && (Date.now() - buttonStates.lastMenuToggle > 400)) {
-                        window.vrMenu.toggle();
-                        buttonStates.menuButton = true;
-                        buttonStates.lastMenuToggle = Date.now();
-                        return;
-                    }
-                } else buttonStates.menuButton = false;
-        
-                // === SHOOT: A / X (index 4) ===
+                // SHOOT: A / X (index 4)
                 if (gp.buttons[4]?.pressed && !playerState.menuOpen) {
                     if (controller && (!controller.userData.lastFire || time - controller.userData.lastFire > 0.15)) {
                         spawnProjectile(controller);
@@ -1283,9 +1289,8 @@
                     }
                 }
         
-                // === GEAR SHIFT: Joystick clicks (index 3) ===
+                // GEAR SHIFT: Joystick clicks (index 3)
                 if (gp.buttons[3]?.pressed && (time - playerState.lastGearShift > 0.25)) {
-                    console.log(`✅ GEAR SHIFT → ${isLeft ? 'DOWN' : 'UP'} to gear ${isLeft ? playerState.gear-1 : playerState.gear+1}`);
                     if (isLeft) {
                         playerState.gear = Math.max(1, playerState.gear - 1);
                     } else {
@@ -1294,13 +1299,12 @@
                     playerState.lastGearShift = time;
                 }
         
-                // === TURNING: Right joystick (axes[2]) ===
+                // TURNING: Right joystick (axes[2])
                 if (Math.abs(gp.axes[2]) > 0.15) {
-                    console.log(`✅ TURNING: ${gp.axes[2].toFixed(2)}`);
-                    dolly.rotation.y -= gp.axes[2] * 2 * dt;   // smooth & responsive
+                    dolly.rotation.y -= gp.axes[2] * 2 * dt;
                 }
         
-                // === THRUST: Triggers (index 0) ===
+                // THRUST: Triggers (index 0)
                 if (gp.buttons[0]?.pressed) {
                     let boost = 1;
                     if (gp.buttons[1]?.pressed && playerState.boosterFuel > 5) {
