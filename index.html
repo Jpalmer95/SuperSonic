@@ -962,22 +962,20 @@
         }
 
         function updateHUD() {
-            if (!hudCtx) return;
-            hudCtx.clearRect(0, 0, 512, 128);
+            if(!hudCtx) return;
+            hudCtx.clearRect(0,0,512,128);
             hudCtx.fillStyle = "rgba(0,0,0,0.6)";
-            hudCtx.fillRect(0, 0, 512, 128);
+            hudCtx.fillRect(0,0,512,128);
+            
             hudCtx.font = "bold 36px Arial";
             hudCtx.fillStyle = "#00ff00";
             hudCtx.textAlign = "center";
             hudCtx.fillText(`Coins: ${coins}  Kills: ${kills}  HP: ${playerState.health}`, 256, 55);
-            hudCtx.fillStyle = "#ffff00";
+            
             hudCtx.font = "bold 28px Arial";
-            hudCtx.fillText(`GEAR ${playerState.gear}   BOOST ${Math.floor(playerState.boosterFuel)}%`, 256, 95);
-            // TEMP DEBUG - remove after testing
             hudCtx.fillStyle = "#ffff00";
-            hudCtx.font = "bold 20px Arial";
-            hudCtx.fillText(`DEBUG BTNS: ${Array.from({length:6}, (_,i)=> gp ? (gp.buttons[i]?.pressed ? i : '') : '').filter(Boolean).join(',')}`, 10, 120);
-            // TEMP DEBUG - remove after testing
+            hudCtx.fillText(`GEAR ${playerState.gear}   BOOST ${Math.floor(playerState.boosterFuel)}%`, 256, 95);
+            
             if (hudTexture) hudTexture.needsUpdate = true;
         }
 
