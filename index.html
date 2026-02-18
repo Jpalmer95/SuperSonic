@@ -318,7 +318,7 @@
         <div class="go-title">SYSTEM FAILURE</div>
         <div class="go-score" id="final-score">Score: 0</div>
         <button class="go-btn" onclick="restartGame()">REBOOT SYSTEM</button>
-        <p style="margin-top:20px; color:#888;">(Or press Trigger in VR)</p>
+        <p style="margin-top:20px; color:#ff0; font-size:18px;">Press ANY Trigger in VR to Restart</p>
     </div>
     
     <div id="error-log"></div>
@@ -396,43 +396,62 @@
         // --- Classes ---
 
         class VRMenuSystem {
-            constructor(scene, radio) {
-                this.scene = scene;
-                this.radio = radio;
-                
-                this.canvas = document.createElement('canvas');
-                this.canvas.width = 512;
-                this.canvas.height = 512;
-                this.ctx = this.canvas.getContext('2d');
-                this.texture = new THREE.CanvasTexture(this.canvas);
-                
-                const geometry = new THREE.PlaneGeometry(0.8, 0.8);
-                const material = new THREE.MeshBasicMaterial({ map: this.texture, transparent: true, opacity: 0.95, depthTest: false });
-                this.mesh = new THREE.Mesh(geometry, material);
-                this.mesh.renderOrder = 1000;
-                this.mesh.visible = false;
-                this.mesh.name = "VR_MENU";
-                scene.add(this.mesh);
-                
-                const cursorGeo = new THREE.SphereGeometry(0.02, 16, 16);
-                const cursorMat = new THREE.MeshBasicMaterial({ color: 0xffff00, depthTest: false });
-                this.cursor = new THREE.Mesh(cursorGeo, cursorMat);
-                this.cursor.visible = false;
-                this.cursor.renderOrder = 1001;
-                scene.add(this.cursor);
+    constructor(scene, radio) {
+        this.scene = scene;
+        this.radio = radio;
+        
+        this.canvas = document.createElement('canvas');
+        this.canvas.width = 512; this.canvas.height = 512;
+        this.ctx = this.canvas.getContext('2d');
+        this.texture = new THREE.CanvasTexture(this.canvas);
+        
+        const geometry = new THREE.PlaneGeometry(0.8, 0.8);
+        const material = new THREE.MeshBasicMaterial({ map: this.texture, transparent: true, opacity: 0.95, depthTest: false });
+        this.mesh = new THREE.Mesh(geometry, material);
+        this.mesh.renderOrder = 1000;
+        this.mesh.visible = false;
+        this.mesh.name = "VR_MENU";
+        scene.add(this.mesh);
+        
+        const cursorGeo = new THREE.SphereGeometry(0.02, 16, 16);
+        const cursorMat = new THREE.MeshBasicMaterial({ color: 0xffff00, depthTest: false });
+        this.cursor = new THREE.Mesh(cursorGeo, cursorMat);
+        this.cursor.visible = false;
+        this.cursor.renderOrder = 1001;
+        scene.add(this.cursor);
 
-                this.options = [
-                    { label: "Location", type: "select", values: ["Metro", "Neon", "Mars", "Austin"], current: 0, y: 120 },
-                    { label: "TRAVEL TO SELECTED", type: "action", action: "warp", y: 170 },
-                    { label: "Speed Gear", type: "slider", min: 1, max: 10, current: 5, y: 230 },
-                    { label: "Toggle Music", type: "action", action: "toggle", y: 290 },
-                    { label: "Next Track", type: "action", action: "next", y: 350 },
-                    { label: "Close Menu", type: "action", action: "close", y: 410 }
-                ];
-                this.hoverIndex = -1;
-                this.cursorX = 0; this.cursorY = 0;
-                this.redraw();
-            }
+        this.options = [
+            { label: "Location", type: "select", values: ["Metro", "Neon", "Mars", "Austin"], current: 0, y: 120 },
+            { label: "TRAVEL TO SELECTED", type: "action", action: "warp", y: 170 },
+            { label: "Speed Gear", type: "slider", min: 1, max: 10, current: 5, y: 230 },
+            { label: "Toggle Music", type: "action", action: "toggle", y: 290 },
+            { label: "Next Track", type: "action", action: "next", y: 350 },
+            { label: "Close Menu", type: "action", action: "close", y: 410 }
+        ];
+        this.hoverIndex = -1;
+        this.redraw();
+    }
+
+    toggle() {
+        if (playerState.isGameOver) return;
+        this.mesh.visible = !this.mesh.visible;
+        this.cursor.visible = this.mesh.visible;
+        playerState.menuOpen = this.mesh.visible;
+        if (laserPointer) laserPointer.visible = this.mesh.visible;
+
+        if(this.mesh.visible) {
+            playerState.velocity.set(0,0,0);
+            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+            forward.y = 0; forward.normalize().multiplyScalar(1.5);
+            const spawnPos = new THREE.Vector3().copy(camera.position).add(dolly.position).add(forward);
+            spawnPos.y = camera.position.y + dolly.position.y;
+            this.mesh.position.copy(spawnPos);
+            this.mesh.lookAt(camera.position.clone().add(dolly.position));
+            this.options[2].current = playerState.gear;   // <-- fixed to real gear
+            this.mesh.updateMatrixWorld(true);
+            this.redraw();
+        }
+    }
 
             toggle() {
                 if (playerState.isGameOver) return;
@@ -496,8 +515,9 @@
                 }
                 else if (opt.label === "Speed Gear") {
                     opt.current++; if(opt.current > opt.max) opt.current = opt.min;
-                    playerState.gear = opt.current;  // Was speedMultiplier
+                    playerState.gear = opt.current;   // <-- now controls real speed
                 }
+
                 else if (opt.label === "Toggle Music") this.radio.toggle();
                 else if (opt.label === "Next Track") this.radio.playNext();
                 else if (opt.label === "Close Menu") this.toggle();
@@ -1150,40 +1170,25 @@
         }
 
         function handleMenuInput() {
-            const session = renderer.xr.getSession(); if (!session) return;
+            const session = renderer.xr.getSession(); if (!session || !playerState.menuOpen) return;
             for (const source of session.inputSources) {
-                if (!source.gamepad) continue;
+                if (!source.gamepad || source.handedness !== 'right') continue;
                 const gp = source.gamepad;
-                
-                // Menu Toggle: NOW B/Y [4] (was [3])
-                if (gp.buttons[4]?.pressed) { 
-                    if (!buttonStates.menuButton && (Date.now() - buttonStates.lastMenuToggle > 500)) {
-                        window.vrMenu.toggle();
-                        buttonStates.menuButton = true;
-                        buttonStates.lastMenuToggle = Date.now();
-                        return;
-                    }
-                } else buttonStates.menuButton = false;
-        
-                if (source.handedness === 'right') {
-                    const controller = getControllerByHandedness('right');
-                    if (controller) {
-                        window.vrMenu.checkIntersection(controller);
-                        if (gp.buttons[0].pressed) { // Right Trigger to Select
-                            if (!buttonStates.trigger) {
-                                window.vrMenu.click();
-                                buttonStates.trigger = true;
-                            }
-                        } else {
-                            buttonStates.trigger = false;
+                const controller = getControllerByHandedness('right');
+                if (controller) {
+                    window.vrMenu.checkIntersection(controller);
+                    if (gp.buttons[0].pressed) { // Right trigger to select
+                        if (!buttonStates.trigger) {
+                            window.vrMenu.click();
+                            buttonStates.trigger = true;
                         }
-                    }
+                    } else buttonStates.trigger = false;
                 }
             }
         }
 
         function handleFlightInput(dt, time) {
-            const session = renderer.xr.getSession(); if (!session) return;
+            const session = renderer.xr.getSession(); if (!session || playerState.isGameOver) return;
             let anyGripPressed = false;
         
             for (const source of session.inputSources) {
@@ -1192,19 +1197,17 @@
                 const isLeft = source.handedness === 'left';
                 const controller = getControllerByHandedness(source.handedness);
         
-                // === MENU TOGGLE: B/Y [4] (always active) ===
+                // MENU: B / Y (index 4)
                 if (gp.buttons[4]?.pressed) {
-                    if (!buttonStates.menuButton && (Date.now() - buttonStates.lastMenuToggle > 500)) {
+                    if (!buttonStates.menuButton && (Date.now() - buttonStates.lastMenuToggle > 400)) {
                         window.vrMenu.toggle();
                         buttonStates.menuButton = true;
                         buttonStates.lastMenuToggle = Date.now();
-                        return;  // Exit frame on toggle
+                        return;
                     }
-                } else {
-                    buttonStates.menuButton = false;
-                }
+                } else buttonStates.menuButton = false;
         
-                // === SHOOT: A/X [3] (only when menu closed) ===
+                // SHOOT: A / X (index 3)
                 if (gp.buttons[3]?.pressed && !playerState.menuOpen) {
                     if (controller && (!controller.userData.lastFire || time - controller.userData.lastFire > 0.15)) {
                         spawnProjectile(controller);
@@ -1212,22 +1215,19 @@
                     }
                 }
         
-                // === GEAR SHIFT: Thumbstick clicks [2] ===
-                if (gp.buttons[2]?.pressed && (time - playerState.lastGearShift > 0.3)) {
-                    if (isLeft) {
-                        playerState.gear = Math.max(1, playerState.gear - 1);
-                    } else {
-                        playerState.gear = Math.min(playerState.maxGear, playerState.gear + 1);
-                    }
+                // GEAR SHIFT: Joystick clicks (index 2)
+                if (gp.buttons[2]?.pressed && (time - playerState.lastGearShift > 0.25)) {
+                    if (isLeft) playerState.gear = Math.max(1, playerState.gear - 1);
+                    else playerState.gear = Math.min(playerState.maxGear, playerState.gear + 1);
                     playerState.lastGearShift = time;
                 }
         
-                // === TURNING: Right stick left/right (axes[0]) ===
-                if (!isLeft && Math.abs(gp.axes[0]) > 0.2) {
-                    dolly.rotation.y -= gp.axes[0] * 3 * dt;  // Faster yaw, smooth turning
+                // TURNING: Right joystick horizontal (axes[0])
+                if (!isLeft && Math.abs(gp.axes[0]) > 0.15) {
+                    dolly.rotation.y -= gp.axes[0] * 2.8 * dt;   // feel free to tweak 2.8
                 }
         
-                // === THRUST: Triggers [0] ===
+                // THRUST (unchanged)
                 if (gp.buttons[0]?.pressed) {
                     let boost = 1;
                     if (gp.buttons[1]?.pressed && playerState.boosterFuel > 5) {
@@ -1235,18 +1235,14 @@
                         anyGripPressed = true;
                     }
                     const dir = new THREE.Vector3(0, 0, -1)
-                        .applyQuaternion(controller.quaternion)
+                        .applyQuaternion(controller ? controller.quaternion : dolly.quaternion)
                         .applyQuaternion(dolly.quaternion)
                         .normalize();
-                    // *** MAX SPEED UPGRADE: gear10 base=300, boost=1140 (wild but controllable) ***
-                    playerState.velocity.addScaledVector(
-                        dir,
-                        playerState.baseSpeed * playerState.gear * 2.0 * boost * dt
-                    );
+                    playerState.velocity.addScaledVector(dir, playerState.baseSpeed * playerState.gear * 2.0 * boost * dt);
                 }
             }
         
-            // Booster fuel (unchanged)
+            // Booster fuel
             if (anyGripPressed) {
                 playerState.boosterFuel -= playerState.boosterDrainRate * dt;
                 if (playerState.boosterFuel < 0) playerState.boosterFuel = 0;
@@ -1366,8 +1362,11 @@
             document.getElementById('final-score').innerText = `Score: ${coins + (kills * 5)}`;
             document.getElementById('game-over-screen').style.display = 'flex';
             document.getElementById('ui-container').style.opacity = '0';
+            
+            if (laserPointer) laserPointer.visible = true; // helps you see the pointer in VR
+            console.log("%cGAME OVER — Press ANY Trigger to Restart in VR", "color:#ff0000;font-size:16px");
         }
-
+        
         window.restartGame = function() {
             playerState.isGameOver = false;
             playerState.health = playerState.maxHealth;
