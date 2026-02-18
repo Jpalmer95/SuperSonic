@@ -1206,7 +1206,7 @@
                 const controller = getControllerByHandedness(source.handedness);
         
                 // === MENU: B / Y (buttons[4]) ===
-                if (gp.buttons[3]?.pressed) {
+                if (gp.buttons[2]?.pressed) {
                     if (!buttonStates.menuButton && (Date.now() - buttonStates.lastMenuToggle > 400)) {
                         window.vrMenu.toggle();
                         buttonStates.menuButton = true;
@@ -1216,7 +1216,7 @@
                 } else buttonStates.menuButton = false;
         
                 // === SHOOT: A / X (buttons[3]) ===
-                if (gp.buttons[2]?.pressed && !playerState.menuOpen) {
+                if (gp.buttons[4]?.pressed && !playerState.menuOpen) {
                     if (controller && (!controller.userData.lastFire || time - controller.userData.lastFire > 0.15)) {
                         spawnProjectile(controller);
                         controller.userData.lastFire = time;
@@ -1224,7 +1224,7 @@
                 }
         
                 // === GEAR SHIFT: Joystick clicks (buttons[4]?) ===
-                if (gp.buttons[4]?.pressed && (time - playerState.lastGearShift > 0.25)) {
+                if (gp.buttons[3]?.pressed && (time - playerState.lastGearShift > 0.25)) {
                     if (isLeft) {
                         playerState.gear = Math.max(1, playerState.gear - 1);
                     } else {
@@ -1235,7 +1235,7 @@
         
                 // === TURNING: Right joystick left/right (axes[2]) ===
                 if (!isLeft && Math.abs(gp.axes[2]) > 0.15) {
-                    dolly.rotation.y -= gp.axes[2] * 3.5 * dt;   // very responsive turning
+                    dolly.rotation.y -= gp.axes[2] * 2.5 * dt;   // very responsive turning
                 }
         
                 // === THRUST: Triggers (buttons[0]) ===
