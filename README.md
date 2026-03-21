@@ -1,8 +1,8 @@
 🚀 SuperSonic VR
 
-A high-speed, browser-based WebXR flight simulator and combat game designed for the Meta Quest 3. Explore procedural cities, alien planets, or real-world locations generated instantly from OpenStreetMap data.
+A high-speed, browser-based WebXR flight simulator and combat game. Explore procedural cities, a planet, or real-world locations generated instantly from OpenStreetMap data.
 
-👉 PLAY NOW (Launch in Quest Browser)
+👉 PLAY NOW (Launch in VR Browser)
 https://jpalmer95.github.io/SuperSonic/
 
 ✨ Features
@@ -29,7 +29,7 @@ Shield integrity system with "Game Over" states.
 
 🎵 Dynamic Music Player:
 
-Loads music directly from a GitHub repository.
+Loads music directly from a GitHub repository of open source music.
 
 Supports local MP3 file uploads from your device.
 
