@@ -42,6 +42,15 @@ adding a mode (add an entry to `MODE_LIST`, set its `menu` label, handle any spe
 Free flight is the default and must stay timer-free. Bests are stored per `envKey:mode` in
 `localStorage` under `supersonic_bests_v1`.
 
+## HUD layout
+
+The HUD is four camera-space quads (`createHudPanel`) placed by `layoutHud()` from the frustum at
+z = -0.5 — aspect is clamped to 1.0–1.6 because a headset eye is near-square while a desktop canvas
+is wide, and the unclamped value pushes the side panels off-screen in VR. Add a new readout by
+creating a panel in `createHUD()`, positioning it in `layoutHud()`, and drawing it in `updateHUD()`;
+don't reintroduce a single full-width slab. Panels use `depthTest: false` and `renderOrder: 999`
+so they always draw over the world and the speed vignette (996).
+
 ## Deployment
 Static site on GitHub Pages. Local dev server runs on port `5500`.
 

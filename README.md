@@ -56,8 +56,9 @@ Adjust speed gears, pick a flight mode, change locations, and manage music witho
 
 📊 Flight HUD:
 
-Coins / kills / health, speed gear and boost fuel, altitude above ground and a compass heading,
-plus the live objective and timer for the current mode.
+Split into four small edge panels so the view stays clear — score (coins / kills / health) top right,
+altitude + compass heading bottom left, the live objective and timer bottom centre, speed gear and
+boost fuel bottom right. During free flight the objective panel is just a faint label, no box.
 
 🎮 Controls (Meta Quest 3)
 

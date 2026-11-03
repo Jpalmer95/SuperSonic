@@ -38,6 +38,17 @@
             transition: opacity 0.3s;
         }
 
+        /* three.js puts VRButton bottom-centre, on top of the HUD objective panel */
+        #VRButton {
+            bottom: auto !important;
+            top: 12px !important;
+            width: auto !important;
+            height: auto !important;
+            padding: 6px 14px !important;
+            font-size: 12px !important;
+            opacity: 0.7;
+        }
+
         #result-screen {
             position: absolute;
             top: 0; left: 0; width: 100%; height: 100%;
@@ -401,8 +412,7 @@
         let envFogColor = 0x87CEEB, envFogNear = 0, envFogFar = 300;
         
         // HUD
-        let hudTexture, hudMesh;
-        let hudCanvas, hudCtx;
+        const hudPanels = {};   // set up in createHUD()
 
         // Game State
         let coins = 0;
@@ -1346,56 +1356,212 @@
 
         function getControllerByHandedness(hand) { return controllers.find(c => c.userData && c.userData.handedness === hand); }
 
+        // HUD: four small edge panels instead of one big slab, so the view stays clear.
+        //   top-right    — score (coins / kills / health)
+        //   bottom-left  — nav (altitude, compass heading)
+        //   bottom-centre— objective (mode, progress, timer)
+        //   bottom-right — drive (gear, boost fuel)
+        function roundRectPath(ctx, x, y, w, h, r) {
+            const rr = Math.min(r, w / 2, h / 2);
+            ctx.beginPath();
+            ctx.moveTo(x + rr, y);
+            ctx.lineTo(x + w - rr, y);
+            ctx.quadraticCurveTo(x + w, y, x + w, y + rr);
+            ctx.lineTo(x + w, y + h - rr);
+            ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
+            ctx.lineTo(x + rr, y + h);
+            ctx.quadraticCurveTo(x, y + h, x, y + h - rr);
+            ctx.lineTo(x, y + rr);
+            ctx.quadraticCurveTo(x, y, x + rr, y);
+            ctx.closePath();
+        }
+
+        function createHudPanel(name, cw, ch, planeW, planeH, x, y) {
+            const canvas = document.createElement('canvas');
+            canvas.width = cw; canvas.height = ch;
+            const ctx = canvas.getContext('2d');
+            const texture = new THREE.CanvasTexture(canvas);
+            const mat = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
+            const mesh = new THREE.Mesh(new THREE.PlaneGeometry(planeW, planeH), mat);
+            mesh.position.set(x, y, -0.5);
+            mesh.renderOrder = 999;
+            camera.add(mesh);
+            hudPanels[name] = { ctx, texture, mesh, w: cw, h: ch };
+            return hudPanels[name];
+        }
+
+        function panelBg(p, alpha = 0.26) {
+            p.ctx.clearRect(0, 0, p.w, p.h);
+            if (alpha <= 0) return;   // no box at all — used for the idle free-flight label
+            p.ctx.fillStyle = `rgba(4, 10, 8, ${alpha})`;
+            roundRectPath(p.ctx, 2, 2, p.w - 4, p.h - 4, 16);
+            p.ctx.fill();
+        }
+
         function createHUD() {
-            hudCanvas = document.createElement('canvas');
-            hudCanvas.width = 512; hudCanvas.height = 184;
-            hudCtx = hudCanvas.getContext('2d');
-            hudTexture = new THREE.CanvasTexture(hudCanvas);
-            
-            const mat = new THREE.MeshBasicMaterial({ map: hudTexture, transparent: true, opacity: 0.8, depthTest: false });
-            const geo = new THREE.PlaneGeometry(0.5, 0.18);
-            hudMesh = new THREE.Mesh(geo, mat);
-            hudMesh.position.set(0, -0.22, -0.5);
-            hudMesh.renderOrder = 999;
-            camera.add(hudMesh);
+            createHudPanel('score',  384, 168, 0.26, 0.114,  0.44,   0.245);
+            createHudPanel('nav',    352, 104, 0.22, 0.065, -0.44,  -0.276);
+            createHudPanel('mode',   560, 128, 0.34, 0.078,  0,     -0.280);
+            createHudPanel('drive',  352, 104, 0.22, 0.065,  0.44,  -0.276);
+            layoutHud();
             updateHUD();
         }
 
+        // Keep the edge panels inside the view. A headset eye is close to square while a
+        // desktop canvas is wide, so the per-eye extents are narrower than camera.aspect
+        // implies — clamp it, and never let a panel hang off the edge.
+        function layoutHud() {
+            if (!hudPanels.score || !camera) return;
+            const z = 0.5;
+            const halfH = z * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+            const halfW = halfH * THREE.MathUtils.clamp(camera.aspect || 1.78, 1.0, 1.6);
+            const edgeX = halfW * 0.97, edgeY = halfH * 0.93;
+
+            const score = hudPanels.score, nav = hudPanels.nav, mode = hudPanels.mode, drive = hudPanels.drive;
+            const sw = 0.26, sh = 0.114, nw = 0.22, nh = 0.065, mw = 0.34, mh = 0.078;
+
+            score.mesh.position.set(edgeX - sw / 2, edgeY - sh / 2, -z);
+            nav.mesh.position.set(-edgeX + nw / 2, -edgeY + nh / 2, -z);
+            drive.mesh.position.set(edgeX - nw / 2, -edgeY + nh / 2, -z);
+            mode.mesh.position.set(0, -edgeY + mh / 2, -z);
+        }
+
         function updateHUD() {
-            if(!hudCtx) return;
-            const W = 512, H = 184;
-            hudCtx.clearRect(0,0,W,H);
-            hudCtx.fillStyle = "rgba(0,0,0,0.6)";
-            hudCtx.fillRect(0,0,W,H);
-            hudCtx.textAlign = "center";
-
-            hudCtx.font = "bold 34px Arial";
-            hudCtx.fillStyle = "#00ff00";
-            hudCtx.fillText(`Coins: ${coins}  Kills: ${kills}  HP: ${playerState.health}`, W/2, 42);
-
-            hudCtx.font = "bold 26px Arial";
-            hudCtx.fillStyle = "#ffff00";
-            hudCtx.fillText(`GEAR ${playerState.gear}   BOOST ${Math.floor(playerState.boosterFuel)}%`, W/2, 76);
-
+            if (!hudPanels.score) return;
             const nav = getNavigationInfo();
-            hudCtx.fillStyle = "#7fe8ff";
-            hudCtx.fillText(`ALT ${Math.max(0, Math.round(nav.alt))}m   HDG ${String(Math.round(nav.heading) % 360).padStart(3,'0')}\u00B0`, W/2, 110);
 
-            // Mode / objective line
-            if (gameState.mode === 'free' && !gameState.active) {
-                hudCtx.fillStyle = "#9a9a9a";
-                hudCtx.fillText("FREE FLIGHT", W/2, 148);
-            } else if (gameState.mode === 'timed') {
-                hudCtx.fillStyle = (gameState.active && gameState.timeLeft < 10) ? "#ff5555" : "#ffaa33";
-                hudCtx.fillText(`TIMED RUN   ${coins} RINGS   ${gameState.active ? gameState.timeLeft.toFixed(1) + 's' : 'END'}`, W/2, 148);
-            } else {
-                const def = getModeDef(gameState.mode);
-                const done = gameState.target === 'coins' ? coins : kills;
-                hudCtx.fillStyle = "#ffaa33";
-                hudCtx.fillText(`${def.label.toUpperCase()}   ${Math.min(done, gameState.goal)}/${gameState.goal}   ${gameState.elapsed.toFixed(1)}s`, W/2, 148);
+            // ---------- score (top right) ----------
+            const s = hudPanels.score, sx = s.ctx;
+            panelBg(s, 0.26);
+            sx.textBaseline = 'middle';
+            sx.textAlign = 'left';
+            sx.font = 'bold 32px Arial';
+            sx.fillStyle = '#8aa39b';
+            sx.fillText('COINS', 24, 34);
+            sx.fillText('KILLS', 24, 84);
+            sx.fillText('HP', 24, 140);
+
+            sx.textAlign = 'right';
+            sx.font = 'bold 40px Arial';
+            sx.fillStyle = '#ffd23f';
+            sx.fillText(String(coins), 360, 34);
+            sx.fillStyle = '#ff8a63';
+            sx.fillText(String(kills), 360, 84);
+
+            const maxHp = playerState.maxHealth || 5;
+            const pips = maxHp, pw = 30, ph = 14, gap = 8;
+            const x0 = 360 - (pips * (pw + gap) - gap);
+            for (let i = 0; i < pips; i++) {
+                sx.fillStyle = i < playerState.health ? '#4cff8f' : 'rgba(255,255,255,0.16)';
+                roundRectPath(sx, x0 + i * (pw + gap), 133, pw, ph, 4);
+                sx.fill();
             }
+            s.texture.needsUpdate = true;
 
-            if (hudTexture) hudTexture.needsUpdate = true;
+            // ---------- nav (bottom left) ----------
+            const n = hudPanels.nav, nx = n.ctx;
+            panelBg(n, 0.24);
+            nx.textBaseline = 'middle';
+            nx.textAlign = 'left';
+            nx.font = 'bold 24px Arial';
+            nx.fillStyle = '#8aa39b';
+            nx.fillText('ALT', 22, 32);
+            nx.fillText('HDG', 22, 74);
+            nx.font = 'bold 32px Arial';
+            nx.fillStyle = '#7fe8ff';
+            nx.textAlign = 'right';
+            nx.fillText(`${Math.max(0, Math.round(nav.alt))}m`, 330, 32);
+            nx.fillText(`${String(Math.round(nav.heading) % 360).padStart(3, '0')}\u00B0`, 330, 74);
+            n.texture.needsUpdate = true;
+
+            // ---------- drive (bottom right) ----------
+            const d = hudPanels.drive, dx = d.ctx;
+            panelBg(d, 0.24);
+            dx.textBaseline = 'middle';
+            dx.textAlign = 'left';
+            dx.font = 'bold 24px Arial';
+            dx.fillStyle = '#8aa39b';
+            dx.fillText('GEAR', 22, 30);
+            dx.textAlign = 'right';
+            dx.fillStyle = '#ffd23f';
+            dx.font = 'bold 30px Arial';
+            dx.fillText(String(playerState.gear), 330, 30);
+
+            // boost bar
+            const bw = 306, bh = 16, bx = 22, by = 58;
+            dx.fillStyle = 'rgba(255,255,255,0.14)';
+            roundRectPath(dx, bx, by, bw, bh, 8); dx.fill();
+            const frac = THREE.MathUtils.clamp(playerState.boosterFuel / (playerState.maxBoosterFuel || 100), 0, 1);
+            const grad = dx.createLinearGradient(bx, 0, bx + bw, 0);
+            grad.addColorStop(0, '#28d1a0');
+            grad.addColorStop(1, '#8ef05a');
+            dx.fillStyle = frac > 0.25 ? grad : '#ff6a4d';
+            roundRectPath(dx, bx, by, Math.max(2, bw * frac), bh, 8); dx.fill();
+            d.texture.needsUpdate = true;
+
+            // ---------- objective (bottom centre) ----------
+            const m = hudPanels.mode, mx = m.ctx;
+            mx.textBaseline = 'middle';
+
+            if (gameState.mode === 'free' && !gameState.active) {
+                // cruise mode: no box, just a quiet label with a soft shadow
+                panelBg(m, 0);
+                mx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+                mx.shadowBlur = 10;
+                mx.textAlign = 'center';
+                mx.font = 'bold 34px Arial';
+                mx.fillStyle = 'rgba(205, 222, 214, 0.55)';
+                mx.fillText('FREE FLIGHT', m.w / 2, m.h / 2 - 12);
+                mx.font = 'bold 21px Arial';
+                mx.fillStyle = 'rgba(160, 185, 175, 0.45)';
+                mx.fillText('B / Y  MENU', m.w / 2, m.h / 2 + 26);
+                mx.shadowBlur = 0;
+                mx.shadowColor = 'transparent';
+            } else if (gameState.mode === 'timed') {
+                panelBg(m, 0.26);
+                const low = gameState.active && gameState.timeLeft < 10;
+                mx.textAlign = 'left';
+                mx.font = 'bold 30px Arial';
+                mx.fillStyle = '#8aa39b';
+                mx.fillText('TIMED RUN', 24, 40);
+                mx.textAlign = 'right';
+                mx.font = 'bold 34px Arial';
+                mx.fillStyle = low ? '#ff5555' : '#ffd23f';
+                mx.fillText(`${coins} rings`, 536, 40);
+                // time bar drains
+                const tw = 512, th = 14, tx = 24, ty = 82;
+                mx.fillStyle = 'rgba(255,255,255,0.14)';
+                roundRectPath(mx, tx, ty, tw, th, 7); mx.fill();
+                const tf = THREE.MathUtils.clamp(gameState.timeLeft / 90, 0, 1);
+                mx.fillStyle = low ? '#ff5555' : '#ffb347';
+                roundRectPath(mx, tx, ty, Math.max(2, tw * tf), th, 7); mx.fill();
+                mx.textAlign = 'right';
+                mx.font = 'bold 26px Arial';
+                mx.fillStyle = low ? '#ff5555' : '#ffd23f';
+                mx.fillText(gameState.active ? gameState.timeLeft.toFixed(1) + 's' : 'END', 536, 110);
+            } else {
+                panelBg(m, 0.26);
+                const def = getModeDef(gameState.mode);
+                const done = Math.min(gameState.target === 'coins' ? coins : kills, gameState.goal);
+                mx.textAlign = 'left';
+                mx.font = 'bold 30px Arial';
+                mx.fillStyle = '#8aa39b';
+                mx.fillText(def.label.toUpperCase(), 24, 40);
+                mx.textAlign = 'right';
+                mx.font = 'bold 34px Arial';
+                mx.fillStyle = '#ffd23f';
+                mx.fillText(`${done}/${gameState.goal}`, 536, 40);
+                const tw = 512, th = 14, tx = 24, ty = 82;
+                mx.fillStyle = 'rgba(255,255,255,0.14)';
+                roundRectPath(mx, tx, ty, tw, th, 7); mx.fill();
+                mx.fillStyle = '#4cff8f';
+                roundRectPath(mx, tx, ty, Math.max(2, tw * (done / gameState.goal)), th, 7); mx.fill();
+                mx.textAlign = 'right';
+                mx.font = 'bold 26px Arial';
+                mx.fillStyle = 'rgba(200,220,210,0.8)';
+                mx.fillText(gameState.elapsed.toFixed(1) + 's', 536, 110);
+            }
+            m.texture.needsUpdate = true;
         }
 
         function updateGameObjects(dt, time) {
@@ -1948,7 +2114,7 @@
             }
         }
         
-        function onWindowResize() { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); resizeVignette(); }
+        function onWindowResize() { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); resizeVignette(); layoutHud(); }
         function render() { 
             const dt = Math.min(clock.getDelta(), 0.1); 
             const time = clock.getElapsedTime();
