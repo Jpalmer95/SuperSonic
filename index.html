@@ -131,6 +131,12 @@
             color: black;
         }
 
+        button.mode-btn.active {
+            background: #4caf50;
+            border-color: #4caf50;
+            color: black;
+        }
+
         button.secondary {
             background: #2d2d2d;
             border-color: #444;
@@ -299,15 +305,15 @@
         <div class="control-group">
             <label>Flight Mode <span style="color:#4caf50; font-weight:normal;" id="mode-label">Free Flight</span></label>
             <div style="display:flex; gap:5px;">
-                <button style="flex:1" onclick="setMode('free')">Free</button>
-                <button style="flex:1" onclick="setMode('rings')">Rings</button>
-                <button style="flex:1" onclick="setMode('hunt')">Hunt</button>
-                <button style="flex:1" onclick="setMode('timed')">Timed</button>
+                <button id="mode-btn-free" class="mode-btn active" style="flex:1" onclick="setMode('free')">Free</button>
+                <button id="mode-btn-rings" class="mode-btn" style="flex:1" onclick="setMode('rings')">Rings</button>
+                <button id="mode-btn-hunt" class="mode-btn" style="flex:1" onclick="setMode('hunt')">Hunt</button>
+                <button id="mode-btn-timed" class="mode-btn" style="flex:1" onclick="setMode('timed')">Timed</button>
             </div>
             <div style="display:flex; gap:5px;">
                 <button id="btn-hud" style="flex:1" onclick="toggleHud()">HUD: On</button>
             </div>
-            <div style="font-size:11px; color:#777;">Free flight is the default. Rings / Hunt / Timed run on any map. <b>H</b> hides the HUD.</div>
+            <div style="font-size:11px; color:#777;">Free flight is the default. Rings / Hunt / Timed arm when selected and start the timer once you begin flying. <b>H</b> hides the HUD.</div>
         </div>
 
         <!-- Music Library -->
@@ -359,7 +365,8 @@
         <div class="go-title">SYSTEM FAILURE</div>
         <div class="go-score" id="final-score">Score: 0</div>
         <button class="go-btn" onclick="restartGame()">REBOOT SYSTEM</button>
-        <p style="margin-top:20px; color:#ff0; font-size:18px;">Press ANY Trigger in VR to Restart</p>
+        <button class="go-btn" style="background:#333; margin-top:12px;" onclick="setMode('free'); restartGame();">BACK TO FREE FLIGHT</button>
+        <p style="margin-top:20px; color:#ff0; font-size:18px;">VR: Trigger / A / X to Restart · B / Y for System Menu</p>
     </div>
 
     <div id="result-screen" style="background: rgba(4, 10, 6, 0.9);">
@@ -368,7 +375,7 @@
         <div id="result-best" style="font-size:20px; color:#7fe8ff; margin-bottom:26px;"></div>
         <button class="go-btn" onclick="replayMode()">FLY AGAIN</button>
         <button class="go-btn" style="background:#333; margin-top:12px;" onclick="setMode('free')">BACK TO FREE FLIGHT</button>
-        <p style="margin-top:18px; color:#ff0; font-size:16px;">Press ANY Trigger in VR to Fly Again</p>
+        <p style="margin-top:18px; color:#ff0; font-size:16px;">VR: Trigger / A / X to Fly Again · B / Y for System Menu</p>
     </div>
     
     <div id="error-log"></div>
@@ -430,9 +437,10 @@
         ];
         const gameState = {
             mode: 'free',        // free | rings | hunt | timed
-            active: false,       // a challenge is running (free is always false)
+            active: false,       // a challenge is armed or running (free is always false)
+            timerRunning: false, // timer only ticks once the player actually starts flying/acting
             goal: 0,
-            target: 'coins',
+            target: null,
             timeLeft: 0,
             elapsed: 0,
             resultOpen: false,
@@ -441,6 +449,12 @@
         try { gameState.bests = JSON.parse(localStorage.getItem('supersonic_bests_v1') || '{}') || {}; } catch (e) { gameState.bests = {}; }
         function saveBests() { try { localStorage.setItem('supersonic_bests_v1', JSON.stringify(gameState.bests)); } catch (e) {} }
         function getModeDef(id) { return MODE_LIST.find(m => m.id === id) || MODE_LIST[0]; }
+        function beginActiveChallengeTimer() {
+            if (gameState.active && !gameState.timerRunning && !playerState.menuOpen && !playerState.isGameOver && !gameState.resultOpen) {
+                gameState.timerRunning = true;
+                updateHUD(true);
+            }
+        }
 
         const playerState = {
             flying: true, 
@@ -465,9 +479,41 @@
             isGameOver: false
         };
 
-        const buttonStates = { leftStickClick: false, menuButton: false, trigger: false, lastMenuToggle: 0 };
+        const buttonStates = {
+            leftStickClick: false,
+            menuButton: false,
+            trigger: false,
+            menuSelect: false,
+            restartArmed: false,
+            waitForTriggerRelease: false,
+            lastMenuToggle: 0
+        };
         const clock = new THREE.Clock();
         const keyState = {}; 
+
+        // Place a world-space overlay (VR menu or VR game-over/result screen) directly in front
+        // of the player's current head position and look direction, accounting for both dolly
+        // rotation (thumbstick yaw / planet surface alignment) and XR headset pose.
+        function placeOverlayInFrontOfCamera(mesh, distance = 1.5, verticalOffset = 0) {
+            if (!mesh || !camera || !dolly) return;
+            dolly.updateMatrixWorld(true);
+            camera.updateMatrixWorld(true);
+            const activeCam = (renderer && renderer.xr && renderer.xr.isPresenting) ? renderer.xr.getCamera() : camera;
+            const camPos = new THREE.Vector3();
+            const camQuat = new THREE.Quaternion();
+            activeCam.getWorldPosition(camPos);
+            activeCam.getWorldQuaternion(camQuat);
+            const localUp = new THREE.Vector3(0, 1, 0).applyQuaternion(dolly.quaternion).normalize();
+            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camQuat);
+            const horiz = forward.clone().addScaledVector(localUp, -forward.dot(localUp));
+            if (horiz.lengthSq() > 1e-4) horiz.normalize();
+            else horiz.set(0, 0, -1).applyQuaternion(dolly.quaternion).normalize();
+            const spawnPos = camPos.clone().addScaledVector(horiz, distance).addScaledVector(localUp, verticalOffset);
+            mesh.position.copy(spawnPos);
+            mesh.up.copy(localUp);
+            mesh.lookAt(camPos);
+            mesh.updateMatrixWorld(true);
+        }
 
         // --- Classes ---
 
@@ -523,31 +569,40 @@
             }
 
             toggle() {
-                if (playerState.isGameOver || gameState.resultOpen) return;
-                this.mesh.visible = !this.mesh.visible;
-                this.cursor.visible = this.mesh.visible;
+                // Allow B / Y to open the System Menu even from the Game Over or Result screen
+                // so the player can pick a new mode or location after a run ends.
+                if (playerState.isGameOver || gameState.resultOpen) {
+                    playerState.isGameOver = false;
+                    gameState.resultOpen = false;
+                    playerState.health = playerState.maxHealth;
+                    const goEl = document.getElementById('game-over-screen');
+                    if (goEl) goEl.style.display = 'none';
+                    hideResult();
+                    this.mesh.visible = true;
+                } else {
+                    this.mesh.visible = !this.mesh.visible;
+                }
+                this.cursor.visible = false;
                 playerState.menuOpen = this.mesh.visible;
                 if (laserPointer) laserPointer.visible = this.mesh.visible;
         
-                if(this.mesh.visible) {
+                if (this.mesh.visible) {
+                    if (document.pointerLockElement) { try { document.exitPointerLock(); } catch (e) {} }
                     playerState.velocity.set(0,0,0);
-                    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-                    forward.y = 0; forward.normalize().multiplyScalar(1.5);
-                    const spawnPos = new THREE.Vector3().copy(camera.position).add(dolly.position).add(forward);
-                    spawnPos.y = camera.position.y + dolly.position.y;
-                    this.mesh.position.copy(spawnPos);
-                    this.mesh.lookAt(camera.position.clone().add(dolly.position));
+                    placeOverlayInFrontOfCamera(this.mesh, 1.5, 0);
                     this.options.find(o => o.label === "Speed Gear").current = playerState.gear;
                     this.syncModeRow();
-                    this.mesh.updateMatrixWorld(true);
                     this.redraw();
+                } else {
+                    buttonStates.waitForTriggerRelease = true;
                 }
             }
 
             checkIntersection(controller) {
-                if (!this.mesh.visible) return false;
+                if (!this.mesh.visible || !controller) return false;
                 const origin = new THREE.Vector3();
                 const direction = new THREE.Vector3();
+                controller.updateMatrixWorld(true);
                 controller.getWorldPosition(origin);
                 const rot = new THREE.Matrix4().extractRotation(controller.matrixWorld);
                 direction.set(0, 0, -1).applyMatrix4(rot).normalize();
@@ -560,14 +615,16 @@
                     const uv = intersects[0].uv;
                     const canvasY = (1 - uv.y) * 512;
                     let newHover = -1;
-                    this.options.forEach((opt, i) => { if (Math.abs(canvasY - opt.y) < 17) newHover = i; });
+                    this.options.forEach((opt, i) => { if (Math.abs(canvasY - opt.y) < 19) newHover = i; });
                     if (this.hoverIndex !== newHover) { this.hoverIndex = newHover; this.redraw(); }
                     return true; 
-                } else {
-                    this.cursor.visible = false;
-                    if (this.hoverIndex !== -1) { this.hoverIndex = -1; this.redraw(); }
-                    return false;
                 }
+                return false;
+            }
+
+            clearHover() {
+                this.cursor.visible = false;
+                if (this.hoverIndex !== -1) { this.hoverIndex = -1; this.redraw(); }
             }
 
             click() {
@@ -584,12 +641,14 @@
                 }
                 else if (opt.label === "Mode") {
                     opt.current = (opt.current + 1) % opt.values.length;
+                    const picked = MODE_LIST.find(m => m.menu === opt.values[opt.current]) || MODE_LIST[0];
+                    startChallenge(picked.id);
                 }
                 else if (opt.label === "START / RESTART MODE") {
                     const modeOpt = this.options.find(o => o.label === "Mode");
                     const picked = MODE_LIST.find(m => m.menu === modeOpt.values[modeOpt.current]) || MODE_LIST[0];
                     startChallenge(picked.id);
-                    this.toggle();   // get out of the way so the run starts immediately
+                    this.toggle();   // closes menu; timer stays armed until player starts flying
                 }
                 else if (opt.label === "Toggle HUD") {
                     setHudEnabled(!playerState.hudEnabled);
@@ -658,14 +717,8 @@
             show(payload) {
                 this.mesh.visible = true;
                 this.redraw(payload);
-                
-                // Position in front of camera
-                const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-                const spawnPos = new THREE.Vector3().copy(camera.position).add(dolly.position).add(forward.multiplyScalar(2));
-                spawnPos.y = camera.position.y + dolly.position.y + 0.2;
-                this.mesh.position.copy(spawnPos);
-                this.mesh.lookAt(camera.position.clone().add(dolly.position));
-                this.mesh.updateMatrixWorld(true);
+                buttonStates.restartArmed = false;
+                placeOverlayInFrontOfCamera(this.mesh, 1.8, 0.05);
             }
         
             hide() {
@@ -674,7 +727,7 @@
         
             // payload: { title, summary, best, good } — or a plain number for a game over
             redraw(payload = {}) {
-                const p = (typeof payload === 'number') ? { title: 'SYSTEM FAILURE', summary: `FINAL SCORE: ${payload}` } : (payload || {});
+                const p = (typeof payload === 'number') ? { title: 'SYSTEM FAILURE', summary: `FINAL SCORE: ${payload}`, good: false } : (payload || {});
                 const title = p.title || 'SYSTEM FAILURE';
                 const accent = p.good === false ? '#ff3333' : '#4caf50';
                 const ctx = this.ctx; const w = this.canvas.width; const h = this.canvas.height;
@@ -682,23 +735,24 @@
                 ctx.strokeStyle = accent; ctx.lineWidth = 12; ctx.strokeRect(20, 20, w-40, h-40);
                 
                 ctx.textAlign = "center";
-                ctx.fillStyle = accent; ctx.font = "bold 52px Arial";
-                ctx.fillText(title, w/2, 130);
+                ctx.fillStyle = accent; ctx.font = "bold 50px Arial";
+                ctx.fillText(title, w/2, 120);
                 
-                ctx.fillStyle = "#ffff00"; ctx.font = "bold 34px Arial";
-                ctx.fillText(p.summary || '', w/2, 215);
+                ctx.fillStyle = "#ffff00"; ctx.font = "bold 32px Arial";
+                ctx.fillText(p.summary || '', w/2, 198);
                 
                 if (p.best) {
                     ctx.fillStyle = "#7fe8ff"; ctx.font = "bold 26px Arial";
-                    ctx.fillText(p.best, w/2, 262);
+                    ctx.fillText(p.best, w/2, 246);
                 }
                 
-                ctx.fillStyle = "#ffffff"; ctx.font = "28px Arial";
-                ctx.fillText("PRESS ANY TRIGGER", w/2, 330);
-                ctx.fillText("TO FLY AGAIN", w/2, 370);
+                ctx.fillStyle = "#ffffff"; ctx.font = "bold 26px Arial";
+                ctx.fillText("TRIGGER / A / X : FLY AGAIN", w/2, 325);
+                ctx.fillStyle = "#a5d6a7"; ctx.font = "bold 24px Arial";
+                ctx.fillText("B / Y : OPEN SYSTEM MENU", w/2, 368);
                 
                 ctx.fillStyle = "#888888"; ctx.font = "18px Arial";
-                ctx.fillText("or click FLY AGAIN on the panel", w/2, 440);
+                ctx.fillText("or use the buttons on the desktop panel", w/2, 438);
                 
                 this.texture.needsUpdate = true;
             }
@@ -712,6 +766,7 @@
                 this.sound = new THREE.Audio(listener);
                 this.sound.setMediaElementSource(this.audioElement);
                 this.sound.setVolume(0.5);
+                this.library = [];
                 this.queue = []; this.currentIndex = -1; this.isPlaying = false;
                 this.githubOwner = "jpalmer95"; this.githubRepo = "openmusic";
 
@@ -735,30 +790,48 @@
                     if (!response.ok) throw new Error("Repo not found");
                     const files = await response.json();
                     const audioFiles = files.filter(f => f.name.match(/\.(mp3|wav|ogg)$/i));
+                    this.library = audioFiles.map(f => ({ name: f.name, url: f.download_url }));
                     container.innerHTML = '';
                     if (audioFiles.length === 0) { container.innerHTML = 'No audio files found.'; return; }
                     audioFiles.forEach(file => {
                         const rawUrl = file.download_url;
                         const div = document.createElement('div'); div.className = 'library-item';
-                        div.innerHTML = `<span style="overflow:hidden;">${file.name}</span><button class="add-btn">+</button>`;
-                        div.onclick = () => this.addToQueue({ name: file.name, url: rawUrl });
+                        div.innerHTML = `<span style="overflow:hidden;">${file.name}</span><button class="add-btn" title="Add to queue">+</button>`;
+                        const addBtn = div.querySelector('.add-btn');
+                        if (addBtn) {
+                            addBtn.onclick = (e) => {
+                                e.stopPropagation();
+                                this.addToQueue({ name: file.name, url: rawUrl }, false);
+                            };
+                        }
+                        div.onclick = () => this.addToQueue({ name: file.name, url: rawUrl }, true);
                         container.appendChild(div);
                     });
                 } catch (e) { console.error(e); container.innerHTML = '<div style="color:red; text-align:center">Error loading library.</div>'; }
             }
-            addToQueue(track) { this.queue.push(track); this.renderQueue(); if (this.currentIndex === -1) { this.currentIndex = 0; this.loadTrack(0, false); } }
+            addToQueue(track, playImmediately = false) {
+                this.queue.push(track);
+                const newIdx = this.queue.length - 1;
+                this.renderQueue();
+                if (playImmediately || this.currentIndex === -1 || !this.isPlaying) {
+                    this.playTrack(newIdx);
+                }
+            }
             addLocalFiles(input) {
                 if (!input.files || input.files.length === 0) return;
+                const firstAdded = this.queue.length;
                 Array.from(input.files).forEach(file => { this.queue.push({ name: file.name, url: URL.createObjectURL(file), isBlob: true }); });
                 this.renderQueue();
-                if (this.currentIndex === -1) { this.currentIndex = 0; this.loadTrack(0, false); }
+                if (this.currentIndex === -1 || !this.isPlaying) {
+                    this.playTrack(firstAdded);
+                }
                 input.value = '';
             }
             removeFromQueue(index) {
                 if (index === this.currentIndex) {
                     this.audioElement.pause(); this.isPlaying = false; this.queue.splice(index, 1);
                     if (this.queue.length === 0) { this.currentIndex = -1; this.updateStatus("Queue Empty"); } 
-                    else { if (this.currentIndex >= this.queue.length) this.currentIndex = 0; this.loadTrack(this.currentIndex, false); }
+                    else { if (this.currentIndex >= this.queue.length) this.currentIndex = 0; this.loadTrack(this.currentIndex, true); }
                 } else { this.queue.splice(index, 1); if (index < this.currentIndex) this.currentIndex--; }
                 this.renderQueue(); this.updatePlayButton();
             }
@@ -779,12 +852,59 @@
                 if (index < 0 || index >= this.queue.length) return;
                 this.currentIndex = index; const track = this.queue[index];
                 this.audioElement.src = track.url; this.updateStatus(track.name); this.renderQueue(); 
-                if (autoPlay) { if (this.listener.context.state === 'suspended') this.listener.context.resume(); this.audioElement.play().catch(e => { console.warn(e); this.updateStatus("Ready"); }); }
+                if (autoPlay) {
+                    if (this.listener && this.listener.context && this.listener.context.state === 'suspended') {
+                        this.listener.context.resume().catch(() => {});
+                    }
+                    this.isPlaying = true;
+                    this.updatePlayButton();
+                    const playPromise = this.audioElement.play();
+                    if (playPromise && typeof playPromise.catch === 'function') {
+                        playPromise.catch(e => {
+                            console.warn(e);
+                            this.isPlaying = false;
+                            this.updatePlayButton();
+                            this.updateStatus(track.name + " (Click Play)");
+                        });
+                    }
+                }
             }
-            playNext() { if (this.queue.length === 0) return; let next = this.currentIndex + 1; if (next >= this.queue.length) next = 0; this.playTrack(next); }
-            playPrev() { if (this.queue.length === 0) return; let prev = this.currentIndex - 1; if (prev < 0) prev = this.queue.length - 1; this.playTrack(prev); }
+            playNext() {
+                if (this.queue.length === 0 && this.library.length > 0) {
+                    this.addToQueue(this.library[0], true);
+                    return;
+                }
+                if (this.queue.length === 0) return;
+                let next = this.currentIndex + 1;
+                if (next >= this.queue.length) next = 0;
+                this.playTrack(next);
+            }
+            playPrev() {
+                if (this.queue.length === 0 && this.library.length > 0) {
+                    this.addToQueue(this.library[0], true);
+                    return;
+                }
+                if (this.queue.length === 0) return;
+                let prev = this.currentIndex - 1;
+                if (prev < 0) prev = this.queue.length - 1;
+                this.playTrack(prev);
+            }
             playTrack(i) { this.loadTrack(i, true); }
-            toggle() { if (this.queue.length === 0) return; if (this.currentIndex === -1) { this.playTrack(0); return; } if (this.isPlaying) this.audioElement.pause(); else this.audioElement.play(); }
+            toggle() {
+                if (this.queue.length === 0 && this.library.length > 0) {
+                    this.addToQueue(this.library[0], true);
+                    return;
+                }
+                if (this.queue.length === 0) return;
+                if (this.currentIndex === -1) { this.playTrack(0); return; }
+                if (this.isPlaying) this.audioElement.pause();
+                else {
+                    if (this.listener && this.listener.context && this.listener.context.state === 'suspended') {
+                        this.listener.context.resume().catch(() => {});
+                    }
+                    this.audioElement.play().catch(e => console.warn(e));
+                }
+            }
             renderQueue() {
                 const list = document.getElementById('queue-list'); if(!list) return; list.innerHTML = '';
                 if (this.queue.length === 0) { list.innerHTML = '<li style="color:#666; text-align:center">Queue is empty</li>'; return; }
@@ -869,20 +989,26 @@
         }
 
         // --- Speed vignette (camera-attached, so it works in VR and on desktop) ---
+        // Pad the vignette canvas & quad by 2x while keeping the inner clear zone and streak
+        // ring at the same world-space radius (R = size / VIGNETTE_PAD). That keeps the top,
+        // left, and right appearance identical while extending the bottom well past Quest 3's
+        // asymmetric ~52° downward lens FOV so the lower quad edge is never visible.
+        const VIGNETTE_PAD = 2.0;
         function createSpeedStreakTexture() {
             const size = 512;
+            const R = size / VIGNETTE_PAD;
             const c = document.createElement('canvas'); c.width = c.height = size;
             const ctx = c.getContext('2d');
-            const g = ctx.createRadialGradient(size/2, size/2, size*0.16, size/2, size/2, size*0.52);
+            const g = ctx.createRadialGradient(size/2, size/2, R*0.16, size/2, size/2, R*0.52);
             g.addColorStop(0.0, 'rgba(255,255,255,0)');
             g.addColorStop(0.6, 'rgba(190,225,255,0.10)');
             g.addColorStop(1.0, 'rgba(225,245,255,0.72)');
             ctx.fillStyle = g; ctx.fillRect(0, 0, size, size);
             ctx.lineCap = 'round';
-            for (let i = 0; i < 130; i++) {
+            for (let i = 0; i < 160; i++) {
                 const a = Math.random() * Math.PI * 2;
-                const r0 = size * (0.30 + Math.random() * 0.10);
-                const r1 = size * (0.47 + Math.random() * 0.13);
+                const r0 = R * (0.30 + Math.random() * 0.10);
+                const r1 = R * (0.50 + Math.random() * 0.42);
                 ctx.strokeStyle = `rgba(255,255,255,${0.05 + Math.random() * 0.28})`;
                 ctx.lineWidth = 1 + Math.random() * 2.5;
                 ctx.beginPath();
@@ -910,9 +1036,9 @@
         // lands outside the vertical FOV and the effect only shows at the left/right edges.
         function resizeVignette() {
             if (!vignetteMesh || !camera) return;
-            const dist = 0.45, overscan = 1.25;
+            const dist = 0.45, overscan = 1.25 * VIGNETTE_PAD;
             const h = 2 * dist * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-            const w = h * (camera.aspect || 1.78);
+            const w = h * Math.max(camera.aspect || 1.78, 1.5);
             vignetteMesh.scale.set((w / 1.7) * overscan, (h / 1.7) * overscan, 1);
         }
 
@@ -1441,26 +1567,27 @@
         }
 
         function createHUD() {
-            createHudPanel('score',  384, 168, 0.26, 0.114,  0.44,   0.245);
-            createHudPanel('nav',    352, 104, 0.22, 0.065, -0.44,  -0.276);
-            createHudPanel('mode',   560, 128, 0.34, 0.078,  0,     -0.280);
-            createHudPanel('drive',  352, 104, 0.22, 0.065,  0.44,  -0.276);
+            createHudPanel('score',  384, 168, 0.185, 0.081,  0.16,   0.20);
+            createHudPanel('nav',    352, 104, 0.145, 0.043, -0.18,  -0.22);
+            createHudPanel('mode',   560, 128, 0.200, 0.046,  0,     -0.22);
+            createHudPanel('drive',  352, 104, 0.145, 0.043,  0.18,  -0.22);
             layoutHud();
             updateHUD();
         }
 
-        // Keep the edge panels inside the view. A headset eye is close to square while a
-        // desktop canvas is wide, so the per-eye extents are narrower than camera.aspect
-        // implies — clamp it, and never let a panel hang off the edge.
+        // Keep the edge panels comfortably inside the binocular VR sweet spot. A Quest 3 eye
+        // view is near-square with circular lens edges and stereo IPD offset, so keeping all
+        // panels within ~73% of the 1:1 half-frustum (~27° outer edge, ~19° panel center)
+        // ensures the left and right HUD panels are fully visible without eye strain.
         function layoutHud() {
             if (!hudPanels.score || !camera) return;
             const z = 0.5;
             const halfH = z * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-            const halfW = halfH * THREE.MathUtils.clamp(camera.aspect || 1.78, 1.0, 1.6);
-            const edgeX = halfW * 0.97, edgeY = halfH * 0.93;
+            const halfW = halfH * THREE.MathUtils.clamp(camera.aspect || 1.0, 0.85, 1.0);
+            const edgeX = halfW * 0.73, edgeY = halfH * 0.72;
 
             const score = hudPanels.score, nav = hudPanels.nav, mode = hudPanels.mode, drive = hudPanels.drive;
-            const sw = 0.26, sh = 0.114, nw = 0.22, nh = 0.065, mw = 0.34, mh = 0.078;
+            const sw = 0.185, sh = 0.081, nw = 0.145, nh = 0.043, mw = 0.200, mh = 0.046;
 
             score.mesh.position.set(edgeX - sw / 2, edgeY - sh / 2, -z);
             nav.mesh.position.set(-edgeX + nw / 2, -edgeY + nh / 2, -z);
@@ -1563,7 +1690,7 @@
             }
 
             // ---------- objective (bottom centre) ----------
-            const modeSig = `${gameState.mode}|${gameState.active}|${coins}|${kills}|${gameState.goal}|` +
+            const modeSig = `${gameState.mode}|${gameState.active}|${gameState.timerRunning}|${coins}|${kills}|${gameState.goal}|` +
                             `${gameState.timeLeft.toFixed(1)}|${gameState.elapsed.toFixed(1)}`;
             if (modeSig !== hudSig.mode) {
             hudSig.mode = modeSig;
@@ -1586,7 +1713,7 @@
                 mx.shadowColor = 'transparent';
             } else if (gameState.mode === 'timed') {
                 panelBg(m, 0.26);
-                const low = gameState.active && gameState.timeLeft < 10;
+                const low = gameState.active && gameState.timerRunning && gameState.timeLeft < 10;
                 mx.textAlign = 'left';
                 mx.font = 'bold 30px Arial';
                 mx.fillStyle = '#8aa39b';
@@ -1603,9 +1730,10 @@
                 mx.fillStyle = low ? '#ff5555' : '#ffb347';
                 roundRectPath(mx, tx, ty, Math.max(2, tw * tf), th, 7); mx.fill();
                 mx.textAlign = 'right';
-                mx.font = 'bold 26px Arial';
+                mx.font = 'bold 24px Arial';
                 mx.fillStyle = low ? '#ff5555' : '#ffd23f';
-                mx.fillText(gameState.active ? gameState.timeLeft.toFixed(1) + 's' : 'END', 536, 110);
+                const statusText = !gameState.active ? 'END' : (gameState.timerRunning ? `${gameState.timeLeft.toFixed(1)}s` : `READY · ${gameState.timeLeft.toFixed(0)}s`);
+                mx.fillText(statusText, 536, 110);
             } else {
                 panelBg(m, 0.26);
                 const def = getModeDef(gameState.mode);
@@ -1622,11 +1750,11 @@
                 mx.fillStyle = 'rgba(255,255,255,0.14)';
                 roundRectPath(mx, tx, ty, tw, th, 7); mx.fill();
                 mx.fillStyle = '#4cff8f';
-                roundRectPath(mx, tx, ty, Math.max(2, tw * (done / gameState.goal)), th, 7); mx.fill();
+                roundRectPath(mx, tx, ty, Math.max(2, tw * (done / Math.max(1, gameState.goal))), th, 7); mx.fill();
                 mx.textAlign = 'right';
-                mx.font = 'bold 26px Arial';
+                mx.font = 'bold 24px Arial';
                 mx.fillStyle = 'rgba(200,220,210,0.8)';
-                mx.fillText(gameState.elapsed.toFixed(1) + 's', 536, 110);
+                mx.fillText(gameState.timerRunning ? `${gameState.elapsed.toFixed(1)}s` : 'READY · 0.0s', 536, 110);
             }
             m.texture.needsUpdate = true;
             }
@@ -1710,33 +1838,49 @@
             const def = getModeDef(modeId);
             gameState.mode = def.id;
             gameState.resultOpen = false;
+            playerState.isGameOver = false;
+            const goEl = document.getElementById('game-over-screen');
+            if (goEl) goEl.style.display = 'none';
             hideResult();
             coins = 0; kills = 0;
             playerState.health = playerState.maxHealth;
             playerState.velocity.set(0, 0, 0);
+            buttonStates.waitForTriggerRelease = true;
 
             if (def.id === 'free') {
-                gameState.active = false; gameState.goal = 0; gameState.target = 'coins';
-                gameState.timeLeft = 0; gameState.elapsed = 0;
+                gameState.active = false;
+                gameState.timerRunning = false;
+                gameState.goal = 0;
+                gameState.target = null;
+                gameState.timeLeft = 0;
+                gameState.elapsed = 0;
             } else {
                 gameState.active = true;
+                gameState.timerRunning = false; // starts ticking only when the player starts flying/acting
                 gameState.goal = def.goal || 0;
-                gameState.target = def.target || 'coins';
+                gameState.target = def.target || null;
                 gameState.timeLeft = def.seconds || 0;
                 gameState.elapsed = 0;
                 // fresh course around the player's current position
                 while (coinsGroup.children.length > 0) coinsGroup.remove(coinsGroup.children[0]);
                 spawnCoins();
-                if (def.id === 'hunt') spawnEnemies(50, playerState.planetRadius, playerState.isPlanet);
+                if (def.id === 'hunt' || def.id === 'timed') spawnEnemies(50, playerState.planetRadius, playerState.isPlanet);
             }
             const modeLabel = document.getElementById('mode-label');
             if (modeLabel) modeLabel.innerText = def.label;
-            updateHUD();
+            MODE_LIST.forEach(m => {
+                const btn = document.getElementById(`mode-btn-${m.id}`);
+                if (btn) btn.classList.toggle('active', m.id === def.id);
+            });
+            updateHUD(true);
             if (window.vrMenu && window.vrMenu.syncModeRow) window.vrMenu.syncModeRow();
         }
 
         function onChallengeProgress() {
             if (!gameState.active) return;
+            if (!gameState.timerRunning) beginActiveChallengeTimer();
+            // Timed Run has no fixed ring/kill target — it only ends when timeLeft reaches 0.
+            if (gameState.mode === 'timed' || !gameState.target || gameState.goal <= 0) return;
             if (gameState.target === 'coins' && coins >= gameState.goal) finishChallenge(true);
             else if (gameState.target === 'kills' && kills >= gameState.goal) finishChallenge(true);
         }
@@ -1744,6 +1888,7 @@
         function finishChallenge(success) {
             if (!gameState.active) return;
             gameState.active = false;
+            gameState.timerRunning = false;
             const def = getModeDef(gameState.mode);
             const key = challengeKey();
             const score = coins + kills * 5;
@@ -1765,11 +1910,11 @@
             const title = gameState.mode === 'timed' ? "TIME'S UP" : (success ? 'COURSE CLEAR' : 'RUN OVER');
             gameState.resultOpen = true;
             showResult(title, summary, bestLine, gameState.mode === 'timed' || success);
-            updateHUD();
+            updateHUD(true);
         }
 
         function updateChallenge(dt) {
-            if (!gameState.active) return;
+            if (!gameState.active || !gameState.timerRunning) return;
             gameState.elapsed += dt;
             if (gameState.mode === 'timed') {
                 gameState.timeLeft -= dt;
@@ -1778,6 +1923,7 @@
         }
 
         function showResult(title, summary, bestLine, good) {
+            if (document.pointerLockElement) { try { document.exitPointerLock(); } catch (e) {} }
             const el = document.getElementById('result-screen');
             if (el) {
                 const t = document.getElementById('result-title');
@@ -1799,7 +1945,60 @@
             if (window.vrGameOver) window.vrGameOver.hide();
         }
 
+        // Poll VR system buttons (B / Y menu toggle and Game Over / Result screen restart)
+        // every frame BEFORE any menuOpen or isGameOver/resultOpen early return.
+        function pollVRSystemButtons() {
+            const session = renderer.xr.getSession();
+            if (!session) return;
+
+            let anyMenuBtnPressed = false;
+            let anyTriggerPressed = false;
+            let anyPrimaryBtnPressed = false;
+
+            for (const source of session.inputSources) {
+                if (!source.gamepad) continue;
+                const gp = source.gamepad;
+                // Quest 3 / WebXR xr-standard mapping:
+                // buttons[0]=trigger, buttons[1]=grip, buttons[3]=thumbstick, buttons[4]=A/X, buttons[5]=B/Y
+                if (gp.buttons[5]?.pressed) anyMenuBtnPressed = true;
+                if (gp.buttons[0]?.pressed) anyTriggerPressed = true;
+                if (gp.buttons[4]?.pressed) anyPrimaryBtnPressed = true;
+            }
+
+            if (!anyTriggerPressed && !anyPrimaryBtnPressed) {
+                buttonStates.waitForTriggerRelease = false;
+            }
+
+            // B / Y (index 5): always opens/closes the VR menu (and dismisses Game Over / Result to open menu)
+            if (anyMenuBtnPressed) {
+                if (!buttonStates.menuButton && (Date.now() - buttonStates.lastMenuToggle > 300)) {
+                    window.vrMenu.toggle();
+                    buttonStates.menuButton = true;
+                    buttonStates.lastMenuToggle = Date.now();
+                }
+            } else {
+                buttonStates.menuButton = false;
+            }
+
+            // Game Over / Result screen: Trigger or A/X restarts once buttons have been released from flight
+            if (playerState.isGameOver || gameState.resultOpen) {
+                const actionPressed = anyTriggerPressed || anyPrimaryBtnPressed;
+                if (!actionPressed) {
+                    buttonStates.restartArmed = true;
+                    buttonStates.trigger = false;
+                } else if (buttonStates.restartArmed && !buttonStates.trigger) {
+                    buttonStates.trigger = true;
+                    buttonStates.restartArmed = false;
+                    buttonStates.waitForTriggerRelease = true;
+                    window.restartGame();
+                }
+            }
+        }
+
         function updatePhysics(dt, time) {
+            pollVRSystemButtons();
+            handleDesktopSystemKeys();
+
             // 1. Menu Safety
             if(playerState.menuOpen) {
                 playerState.velocity.set(0,0,0);
@@ -1979,59 +2178,35 @@
         function handleMenuInput() {
             const session = renderer.xr.getSession(); 
             if (!session || !playerState.menuOpen) return;
+            dolly.updateMatrixWorld(true);
+
+            // Allow pointing with either controller (prefer right if intersecting, else left)
+            const rightCtrl = getControllerByHandedness('right') || controllers[0];
+            const leftCtrl = getControllerByHandedness('left') || controllers[1];
+            let hit = false;
+            if (rightCtrl && window.vrMenu.checkIntersection(rightCtrl)) hit = true;
+            else if (leftCtrl && window.vrMenu.checkIntersection(leftCtrl)) hit = true;
+            if (!hit) window.vrMenu.clearHover();
+
+            let selectPressed = false;
             for (const source of session.inputSources) {
-                if (!source.gamepad || source.handedness !== 'right') continue;
+                if (!source.gamepad) continue;
                 const gp = source.gamepad;
-                const controller = getControllerByHandedness('right');
-                if (controller) {
-                    window.vrMenu.checkIntersection(controller);
-                    if (gp.buttons[0].pressed) { // Right trigger to select in menu
-                        if (!buttonStates.trigger) {
-                            window.vrMenu.click();
-                            buttonStates.trigger = true;
-                        }
-                    } else {
-                        buttonStates.trigger = false;
-                    }
+                if (gp.buttons[0]?.pressed || gp.buttons[4]?.pressed) selectPressed = true;
+            }
+            if (selectPressed) {
+                if (!buttonStates.menuSelect) {
+                    buttonStates.menuSelect = true;
+                    window.vrMenu.click();
                 }
+            } else {
+                buttonStates.menuSelect = false;
             }
         }
 
         function handleFlightInput(dt, time) {
             const session = renderer.xr.getSession(); 
-            if (!session) return;
-        
-            // === MENU TOGGLE: B / Y (index 5) - ALWAYS ACTIVE (open OR close) ===
-            for (const source of session.inputSources) {
-                if (!source.gamepad) continue;
-                const gp = source.gamepad;
-                if (gp.buttons[5]?.pressed) {
-                    if (!buttonStates.menuButton && (Date.now() - buttonStates.lastMenuToggle > 400)) {
-                        window.vrMenu.toggle();
-                        buttonStates.menuButton = true;
-                        buttonStates.lastMenuToggle = Date.now();
-                        // Do not return here - we still want to process other inputs if needed
-                    }
-                } else {
-                    buttonStates.menuButton = false;
-                }
-            }
-        
-            // Game Over / result screen restart (any trigger)
-            if (playerState.isGameOver || gameState.resultOpen) {
-                for (const source of session.inputSources) {
-                    if (source.gamepad && source.gamepad.buttons[0]?.pressed) {
-                        if (!buttonStates.trigger) {
-                            window.restartGame();
-                            buttonStates.trigger = true;
-                            return;
-                        }
-                    } else {
-                        buttonStates.trigger = false;
-                    }
-                }
-                return;
-            }
+            if (!session || playerState.menuOpen || playerState.isGameOver || gameState.resultOpen) return;
         
             let anyGripPressed = false;
         
@@ -2042,7 +2217,8 @@
                 const controller = getControllerByHandedness(source.handedness);
         
                 // SHOOT: A / X (index 4)
-                if (gp.buttons[4]?.pressed && !playerState.menuOpen) {
+                if (gp.buttons[4]?.pressed && !playerState.menuOpen && !buttonStates.waitForTriggerRelease) {
+                    beginActiveChallengeTimer();
                     if (controller && (!controller.userData.lastFire || time - controller.userData.lastFire > 0.15)) {
                         spawnProjectile(controller);
                         controller.userData.lastFire = time;
@@ -2071,7 +2247,8 @@
                 }
         
                 // THRUST: Triggers (index 0)
-                if (gp.buttons[0]?.pressed) {
+                if (gp.buttons[0]?.pressed && !buttonStates.waitForTriggerRelease) {
+                    beginActiveChallengeTimer();
                     let boost = 1;
                     if (gp.buttons[1]?.pressed && playerState.boosterFuel > 5) {
                         boost = 3.8;
@@ -2098,17 +2275,8 @@
             }
         }
         
-        function handleDesktopInput(dt) {
-            if (renderer.xr.isPresenting) return; 
-            const speed = (keyState['ShiftLeft'] ? playerState.baseSpeed * 2 : playerState.baseSpeed) * playerState.speedMultiplier;
-            const front = new THREE.Vector3(); camera.getWorldDirection(front);
-            const right = new THREE.Vector3(); right.crossVectors(front, new THREE.Vector3(0, 1, 0)).normalize();
-            if (keyState['KeyW']) playerState.velocity.addScaledVector(front, speed * dt);
-            if (keyState['KeyS']) playerState.velocity.addScaledVector(front, -speed * dt);
-            if (keyState['KeyD']) playerState.velocity.addScaledVector(right, speed * dt);
-            if (keyState['KeyA']) playerState.velocity.addScaledVector(right, -speed * dt);
-            if (keyState['Space']) playerState.velocity.y += 20 * dt;
-            if (keyState['KeyC'] || keyState['ControlLeft']) playerState.velocity.y -= 20 * dt;
+        function handleDesktopSystemKeys() {
+            if (renderer.xr.isPresenting) return;
             if (keyState['KeyH'] && !buttonStates.hudKey) {   // Desktop: hide/show HUD
                 buttonStates.hudKey = true;
                 toggleHud();
@@ -2118,6 +2286,28 @@
                 const idx = MODE_LIST.findIndex(m => m.id === gameState.mode);
                 setMode(MODE_LIST[(idx + 1) % MODE_LIST.length].id);
             } else if (!keyState['KeyM']) buttonStates.modeKey = false;
+            if ((playerState.isGameOver || gameState.resultOpen) && (keyState['Enter'] || keyState['KeyR']) && !buttonStates.desktopRestartKey) {
+                buttonStates.desktopRestartKey = true;
+                window.restartGame();
+            } else if (!keyState['Enter'] && !keyState['KeyR']) {
+                buttonStates.desktopRestartKey = false;
+            }
+        }
+
+        function handleDesktopInput(dt) {
+            if (renderer.xr.isPresenting) return; 
+            const mult = playerState.speedMultiplier || (playerState.gear * 0.4);
+            const speed = (keyState['ShiftLeft'] ? playerState.baseSpeed * 2 : playerState.baseSpeed) * mult;
+            const front = new THREE.Vector3(); camera.getWorldDirection(front);
+            const right = new THREE.Vector3(); right.crossVectors(front, new THREE.Vector3(0, 1, 0)).normalize();
+            const moving = keyState['KeyW'] || keyState['KeyS'] || keyState['KeyD'] || keyState['KeyA'] || keyState['Space'] || keyState['KeyC'] || keyState['ControlLeft'] || keyState['KeyF'];
+            if (moving) beginActiveChallengeTimer();
+            if (keyState['KeyW']) playerState.velocity.addScaledVector(front, speed * dt);
+            if (keyState['KeyS']) playerState.velocity.addScaledVector(front, -speed * dt);
+            if (keyState['KeyD']) playerState.velocity.addScaledVector(right, speed * dt);
+            if (keyState['KeyA']) playerState.velocity.addScaledVector(right, -speed * dt);
+            if (keyState['Space']) playerState.velocity.y += 20 * dt;
+            if (keyState['KeyC'] || keyState['ControlLeft']) playerState.velocity.y -= 20 * dt;
             if (keyState['KeyF']) { // Desktop Fire
                 const time = clock.getElapsedTime();
                  if (!playerState.lastFire || time - playerState.lastFire > 0.2) {
@@ -2186,14 +2376,27 @@
                 scene.add(cityGroup); scene.add(coinsGroup); scene.add(propsGroup); scene.add(enemiesGroup);
                 generateCity('metro');
 
+                // When entering VR, re-arm any selected challenge mode so the timer starts fresh
+                // on the player's first flight input inside the headset.
+                renderer.xr.addEventListener('sessionstart', () => {
+                    layoutHud();
+                    resizeVignette();
+                    if (gameState.mode !== 'free' || playerState.isGameOver || gameState.resultOpen) {
+                        startChallenge(gameState.mode);
+                    }
+                });
+
                 // Don't steal keys from the city search box
                 const isTyping = (e) => { const t = e.target; return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable); };
                 document.addEventListener('keydown', (e) => { if (isTyping(e)) return; keyState[e.code] = true; });
                 document.addEventListener('keyup', (e) => { if (isTyping(e)) return; keyState[e.code] = false; });
                 
-                document.body.addEventListener('click', () => {
+                document.body.addEventListener('click', (e) => {
                     if (listener.context.state === 'suspended') listener.context.resume();
-                    if(!renderer.xr.isPresenting && document.activeElement.tagName !== 'INPUT') document.body.requestPointerLock();
+                    const inUi = e.target && e.target.closest && e.target.closest('#ui-container, #game-over-screen, #result-screen, #VRButton, button, input');
+                    if (!renderer.xr.isPresenting && !inUi && !playerState.isGameOver && !gameState.resultOpen && !playerState.menuOpen && document.activeElement.tagName !== 'INPUT') {
+                        document.body.requestPointerLock();
+                    }
                 });
                 window.addEventListener('resize', onWindowResize);
                 
@@ -2222,7 +2425,9 @@
 
         // --- Game Over/Restart Functions ---
         function triggerGameOver() {
+            if (document.pointerLockElement) { try { document.exitPointerLock(); } catch (e) {} }
             playerState.isGameOver = true;
+            gameState.timerRunning = false;
             playerState.velocity.set(0,0,0);
             
             const finalScore = coins + (kills * 5);
@@ -2317,6 +2522,11 @@
             }
             generateCity(type);
             if (type === 'mars') placePlayerAboveSurface(2);
+            if (gameState.mode !== 'free' || playerState.isGameOver || gameState.resultOpen) {
+                startChallenge(gameState.mode);
+            } else {
+                updateHUD(true);
+            }
         };
 
         function processOSMData(data, originLon, originLat) {
@@ -2412,7 +2622,14 @@
                     }
                 }
             });
+            while (coinsGroup.children.length > 0) coinsGroup.remove(coinsGroup.children[0]);
             spawnCoins();
+            if (gameState.active) {
+                gameState.timerRunning = false;
+                gameState.elapsed = 0;
+                if (gameState.mode === 'timed') gameState.timeLeft = getModeDef('timed').seconds || 90;
+                updateHUD(true);
+            }
             if(buildingCount === 0) document.getElementById('loading').innerText = "No buildings found in this area.";
         }
 
