@@ -491,27 +491,27 @@
         const clock = new THREE.Clock();
         const keyState = {}; 
 
-        // Place a world-space overlay (VR menu or VR game-over/result screen) directly in front
-        // of the player's current head position and look direction, accounting for both dolly
-        // rotation (thumbstick yaw / planet surface alignment) and XR headset pose.
-        function placeOverlayInFrontOfCamera(mesh, distance = 1.5, verticalOffset = 0) {
+        // Place an overlay (VR menu or VR game-over/result screen, parented to dolly) directly
+        // in front of the player's current head pose inside dolly space. Because WebXRManager
+        // only copies dolly.matrixWorld onto cameraXR inside renderer.render(), cameraXR.position
+        // and cameraXR.quaternion during updatePhysics() are in dolly-local (local-floor) space.
+        // Parenting the overlay to dolly and positioning it from the local head pose ensures the
+        // overlay and eye cameras share dolly.matrixWorld on every frame.
+        function placeOverlayInFrontOfCamera(mesh, distance = 1.35, verticalOffset = 0) {
             if (!mesh || !camera || !dolly) return;
-            dolly.updateMatrixWorld(true);
-            camera.updateMatrixWorld(true);
+            if (mesh.parent !== dolly) dolly.add(mesh);
             const activeCam = (renderer && renderer.xr && renderer.xr.isPresenting) ? renderer.xr.getCamera() : camera;
-            const camPos = new THREE.Vector3();
-            const camQuat = new THREE.Quaternion();
-            activeCam.getWorldPosition(camPos);
-            activeCam.getWorldQuaternion(camQuat);
-            const localUp = new THREE.Vector3(0, 1, 0).applyQuaternion(dolly.quaternion).normalize();
-            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camQuat);
-            const horiz = forward.clone().addScaledVector(localUp, -forward.dot(localUp));
-            if (horiz.lengthSq() > 1e-4) horiz.normalize();
-            else horiz.set(0, 0, -1).applyQuaternion(dolly.quaternion).normalize();
-            const spawnPos = camPos.clone().addScaledVector(horiz, distance).addScaledVector(localUp, verticalOffset);
-            mesh.position.copy(spawnPos);
-            mesh.up.copy(localUp);
-            mesh.lookAt(camPos);
+            const headPos = activeCam.position;
+            const headQuat = activeCam.quaternion;
+            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(headQuat);
+            forward.y = THREE.MathUtils.clamp(forward.y, -0.35, 0.35);
+            if (forward.lengthSq() < 1e-4) forward.set(0, 0, -1);
+            forward.normalize();
+            mesh.position.copy(headPos).addScaledVector(forward, distance);
+            mesh.position.y += verticalOffset;
+            const lookMat = new THREE.Matrix4().lookAt(headPos, mesh.position, new THREE.Vector3(0, 1, 0));
+            mesh.quaternion.setFromRotationMatrix(lookMat);
+            dolly.updateMatrixWorld(true);
             mesh.updateMatrixWorld(true);
         }
 
@@ -528,18 +528,23 @@
                 this.texture = new THREE.CanvasTexture(this.canvas);
                 
                 const geometry = new THREE.PlaneGeometry(0.8, 0.8);
-                const material = new THREE.MeshBasicMaterial({ map: this.texture, transparent: true, opacity: 0.95, depthTest: false });
+                const material = new THREE.MeshBasicMaterial({
+                    map: this.texture, transparent: true, opacity: 0.95,
+                    depthTest: false, depthWrite: false, fog: false, side: THREE.DoubleSide
+                });
                 this.mesh = new THREE.Mesh(geometry, material);
                 this.mesh.renderOrder = 1000;
+                this.mesh.frustumCulled = false;
                 this.mesh.visible = false;
                 this.mesh.name = "VR_MENU";
-                scene.add(this.mesh);
+                dolly.add(this.mesh);
                 
                 const cursorGeo = new THREE.SphereGeometry(0.02, 16, 16);
-                const cursorMat = new THREE.MeshBasicMaterial({ color: 0xffff00, depthTest: false });
+                const cursorMat = new THREE.MeshBasicMaterial({ color: 0xffff00, depthTest: false, depthWrite: false, fog: false });
                 this.cursor = new THREE.Mesh(cursorGeo, cursorMat);
                 this.cursor.visible = false;
-                this.cursor.renderOrder = 1001;
+                this.cursor.frustumCulled = false;
+                this.cursor.renderOrder = 1003;
                 scene.add(this.cursor);
         
                 this.options = [
@@ -613,10 +618,13 @@
                     this.cursor.visible = true;
                     this.cursor.position.copy(intersects[0].point);
                     const uv = intersects[0].uv;
-                    const canvasY = (1 - uv.y) * 512;
+                    this.cursorX = uv.x * 512;
+                    this.cursorY = (1 - uv.y) * 512;
+                    const canvasY = this.cursorY;
                     let newHover = -1;
                     this.options.forEach((opt, i) => { if (Math.abs(canvasY - opt.y) < 19) newHover = i; });
-                    if (this.hoverIndex !== newHover) { this.hoverIndex = newHover; this.redraw(); }
+                    this.hoverIndex = newHover;
+                    this.redraw();
                     return true; 
                 }
                 return false;
@@ -624,6 +632,8 @@
 
             clearHover() {
                 this.cursor.visible = false;
+                this.cursorX = undefined;
+                this.cursorY = undefined;
                 if (this.hoverIndex !== -1) { this.hoverIndex = -1; this.redraw(); }
             }
 
@@ -703,13 +713,17 @@
                     map: this.texture, 
                     transparent: true, 
                     opacity: 0.98, 
-                    depthTest: false 
+                    depthTest: false,
+                    depthWrite: false,
+                    fog: false,
+                    side: THREE.DoubleSide
                 });
                 this.mesh = new THREE.Mesh(geometry, material);
                 this.mesh.renderOrder = 2000;
+                this.mesh.frustumCulled = false;
                 this.mesh.visible = false;
                 this.mesh.name = "VR_GAMEOVER";
-                scene.add(this.mesh);
+                dolly.add(this.mesh);
                 
                 this.redraw();
             }
@@ -1511,7 +1525,10 @@
             for (let i = 0; i < 2; i++) {
                 const controller = renderer.xr.getController(i);
                 const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-5)]);
-                const line = new THREE.Line(geometry); line.name = 'line'; line.scale.z = 1;
+                const lineMat = new THREE.LineBasicMaterial({ color: 0x00ffcc, depthTest: false, depthWrite: false, fog: false });
+                const line = new THREE.Line(geometry, lineMat); line.name = 'line'; line.scale.z = 1;
+                line.renderOrder = 1002;
+                line.frustumCulled = false;
                 line.visible = false; // Only visible in menu mode
                 controller.add(line); 
                 dolly.add(controller); controllers.push(controller);
