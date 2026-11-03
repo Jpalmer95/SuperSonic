@@ -51,6 +51,24 @@ creating a panel in `createHUD()`, positioning it in `layoutHud()`, and drawing 
 don't reintroduce a single full-width slab. Panels use `depthTest: false` and `renderOrder: 999`
 so they always draw over the world and the speed vignette (996).
 
+## Performance budget (this scene is VR-first)
+
+Measured on a software renderer, so ratios matter more than absolute fps — each rule below was
+worth a measurable chunk of frame time:
+
+- **Never add a light per prop.** Every `PointLight` is evaluated per fragment in every material;
+  50 lamp lights cost ~45% of the frame (8.8 → 16.4 fps with them off). Use an emissive mesh plus an
+  additive `Points` glow — one draw call, no shader cost.
+- **Freeze the shadow map.** All casters are static, so `renderer.shadowMap.autoUpdate = false` and
+  `needsUpdate = true` once per `generateCity()`. 2048² is plenty.
+- **Gate HUD redraws.** Each redraw re-uploads a canvas texture; `updateHUD()` is throttled to ~15 Hz
+  and skips panels whose content signature is unchanged. Never draw the HUD every frame.
+- **Reuse scratch vectors** (`_sUp`, `_sDir`, `_sYaw`, …) in the per-frame path. Allocating
+  `new Vector3()` per frame produces periodic GC hitches on long flights.
+- **Cache HDR environments by URL** (`envCache`) — refetching + PMREM per level switch causes a
+  visible hitch every time you travel.
+- **No `backdrop-filter` over the canvas** — it forces the compositor to re-blur every frame.
+
 ## Deployment
 Static site on GitHub Pages. Local dev server runs on port `5500`.
 

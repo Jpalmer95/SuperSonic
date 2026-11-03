@@ -60,6 +60,9 @@ Split into four small edge panels so the view stays clear — score (coins / kil
 altitude + compass heading bottom left, the live objective and timer bottom centre, speed gear and
 boost fuel bottom right. During free flight the objective panel is just a faint label, no box.
 
+Prefer a completely clean view? Toggle **Toggle HUD** in the VR menu, the **HUD: On/Off** button on the
+desktop panel, or press **H**. The choice is remembered between sessions.
+
 🎮 Controls (Meta Quest 3)
 
 Action

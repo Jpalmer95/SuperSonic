@@ -27,7 +27,7 @@
             background: rgba(0, 0, 0, 0.85);
             padding: 20px;
             border-radius: 12px;
-            backdrop-filter: blur(5px);
+            /* no backdrop-filter: it forces the compositor to re-blur the canvas every frame */
             border: 1px solid #333;
             max-width: 340px;
             max-height: 90vh;
@@ -304,7 +304,10 @@
                 <button style="flex:1" onclick="setMode('hunt')">Hunt</button>
                 <button style="flex:1" onclick="setMode('timed')">Timed</button>
             </div>
-            <div style="font-size:11px; color:#777;">Free flight is the default. Rings / Hunt / Timed run on any map.</div>
+            <div style="display:flex; gap:5px;">
+                <button id="btn-hud" style="flex:1" onclick="toggleHud()">HUD: On</button>
+            </div>
+            <div style="font-size:11px; color:#777;">Free flight is the default. Rings / Hunt / Timed run on any map. <b>H</b> hides the HUD.</div>
         </div>
 
         <!-- Music Library -->
@@ -457,6 +460,7 @@
             planetRadius: 2000,
             health: 5,
             maxHealth: 5,
+            hudEnabled: true,
             invulnerableUntil: 0,
             isGameOver: false
         };
@@ -493,19 +497,22 @@
                 scene.add(this.cursor);
         
                 this.options = [
-                    { label: "Location", type: "select", values: ["Metro", "Neon", "Mars", "Austin"], current: 0, y: 95 },
-                    { label: "TRAVEL TO SELECTED", type: "action", action: "warp", y: 138 },
-                    { label: "Mode", type: "select", values: ["Free", "Rings", "Hunt", "Timed"], current: 0, y: 186 },
-                    { label: "START / RESTART MODE", type: "action", action: "startmode", y: 229 },
-                    { label: "Speed Gear", type: "slider", min: 1, max: 10, current: 5, y: 272 },
-                    { label: "Toggle Music", type: "action", action: "toggle", y: 315 },
-                    { label: "Next Track", type: "action", action: "next", y: 358 },
-                    { label: "Close Menu", type: "action", action: "close", y: 401 }
+                    { label: "Location", type: "select", values: ["Metro", "Neon", "Mars", "Austin"], current: 0, y: 88 },
+                    { label: "TRAVEL TO SELECTED", type: "action", action: "warp", y: 130 },
+                    { label: "Mode", type: "select", values: ["Free", "Rings", "Hunt", "Timed"], current: 0, y: 172 },
+                    { label: "START / RESTART MODE", type: "action", action: "startmode", y: 214 },
+                    { label: "Toggle HUD", type: "action", action: "hud", y: 256 },
+                    { label: "Speed Gear", type: "slider", min: 1, max: 10, current: 5, y: 298 },
+                    { label: "Toggle Music", type: "action", action: "toggle", y: 340 },
+                    { label: "Next Track", type: "action", action: "next", y: 382 },
+                    { label: "Close Menu", type: "action", action: "close", y: 424 }
                 ];
                 this.hoverIndex = -1;
                 this.redraw();
             }
         
+            syncHudRow() { this.redraw(); }
+
             syncModeRow() {
                 const modeOpt = this.options.find(o => o.label === "Mode");
                 if (!modeOpt) return;
@@ -553,7 +560,7 @@
                     const uv = intersects[0].uv;
                     const canvasY = (1 - uv.y) * 512;
                     let newHover = -1;
-                    this.options.forEach((opt, i) => { if (Math.abs(canvasY - opt.y) < 19) newHover = i; });
+                    this.options.forEach((opt, i) => { if (Math.abs(canvasY - opt.y) < 17) newHover = i; });
                     if (this.hoverIndex !== newHover) { this.hoverIndex = newHover; this.redraw(); }
                     return true; 
                 } else {
@@ -584,6 +591,9 @@
                     startChallenge(picked.id);
                     this.toggle();   // get out of the way so the run starts immediately
                 }
+                else if (opt.label === "Toggle HUD") {
+                    setHudEnabled(!playerState.hudEnabled);
+                }
                 else if (opt.label === "Speed Gear") {
                     opt.current++; if(opt.current > opt.max) opt.current = opt.min;
                     playerState.gear = opt.current;   // <-- now controls real speed
@@ -606,6 +616,7 @@
                     let text = opt.label;
                     if (opt.type === "select") text += `: < ${opt.values[opt.current]} >`;
                     if (opt.type === "slider") text += `: [ ${opt.current} ]`;
+                    if (opt.label === "Toggle HUD") text += playerState.hudEnabled ? ": On" : ": Off";
                     ctx.textAlign = "center"; ctx.fillText(text, w/2, opt.y);
                 });
                 if (playerState.menuOpen) {
@@ -1030,7 +1041,7 @@
         // or the player clips through hills and floats over crater floors.
         let planetCraters = [];
         function planetTerrainRadius(dirUnit) {
-            const v = dirUnit.clone().multiplyScalar(playerState.planetRadius);
+            const v = _sTerrain.copy(dirUnit).multiplyScalar(playerState.planetRadius);
             let disp = 0;
             for (const c of planetCraters) {
                 const t = v.distanceTo(c.vec) / c.radius;
@@ -1105,15 +1116,33 @@
             const poleGeo = new THREE.CylinderGeometry(0.1, 0.1, 4);
             const lightGeo = new THREE.SphereGeometry(0.3);
             const personGeo = new THREE.CapsuleGeometry(0.3, 1, 4, 8);
+            const poleMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+            const bulbMat = new THREE.MeshBasicMaterial({ color: 0xffffaa });
+            // Lamp glow is drawn as one additive Points cloud instead of 50 PointLights:
+            // every point light is evaluated per fragment in every material, and 50 of them
+            // halved the frame rate.
+            const glowPositions = [];
+            const lampGlow = (type === 'neon' || type === 'metro');
             for(let i=0; i<50; i++) {
                 const x = (Math.random()-0.5) * 400; const z = (Math.random()-0.5) * 400;
-                const pole = new THREE.Mesh(poleGeo, new THREE.MeshStandardMaterial({color:0x222222})); pole.position.set(x, 2, z); propsGroup.add(pole);
-                const bulb = new THREE.Mesh(lightGeo, new THREE.MeshBasicMaterial({color: 0xffffaa})); bulb.position.set(0, 2, 0); pole.add(bulb);
-                if(type === 'neon' || type === 'metro') { const pointLight = new THREE.PointLight(0xffffaa, 2, 10); pointLight.position.set(0, 1.5, 0); pole.add(pointLight); }
+                const pole = new THREE.Mesh(poleGeo, poleMat); pole.position.set(x, 2, z); propsGroup.add(pole);
+                const bulb = new THREE.Mesh(lightGeo, bulbMat); bulb.position.set(0, 2, 0); pole.add(bulb);
+                if (lampGlow) glowPositions.push(x, 3.6, z);
                 const personMat = new THREE.MeshStandardMaterial({color: Math.random() * 0xffffff});
                 const person = new THREE.Mesh(personGeo, personMat); person.position.set(x + 2, 0.9, z + 2);
                 person.userData = { velocity: new THREE.Vector3((Math.random()-0.5)*2, 0, (Math.random()-0.5)*2), hopOffset: Math.random() * Math.PI };
                 propsGroup.add(person);
+            }
+            if (glowPositions.length) {
+                const geo = new THREE.BufferGeometry();
+                geo.setAttribute('position', new THREE.Float32BufferAttribute(glowPositions, 3));
+                const mat = new THREE.PointsMaterial({
+                    color: 0xffe6a8, size: 11, map: getPuffTexture(), transparent: true,
+                    blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.5, fog: true
+                });
+                const glow = new THREE.Points(geo, mat);
+                glow.name = 'lampGlow';
+                propsGroup.add(glow);
             }
         }
 
@@ -1170,6 +1199,27 @@
             for(let i=0; i<30; i++) spawnCoin();
         }
 
+        // HDR environments are expensive to fetch/decode/PMREM — do it once per URL.
+        const envCache = new Map();
+        let rgbeLoader = null;
+        function applyEnvironment(url, useAsSky) {
+            const hit = envCache.get(url);
+            if (hit) {
+                if (useAsSky) scene.background = hit.texture;
+                scene.environment = hit.envMap;
+                scene.environmentIntensity = useAsSky ? 1.0 : 0.45;
+                return;
+            }
+            if (!rgbeLoader) rgbeLoader = new RGBELoader();
+            rgbeLoader.load(url, (texture) => {
+                const envMap = pmremGenerator.fromEquirectangular(texture).texture;
+                envCache.set(url, { texture, envMap });
+                if (useAsSky) scene.background = texture;
+                scene.environment = envMap;
+                scene.environmentIntensity = useAsSky ? 1.0 : 0.45;
+            });
+        }
+
         function initSky() {
             sky = new Sky();
             sky.scale.setScalar(450000);
@@ -1196,16 +1246,7 @@
             playerState.isPlanet = false;
             playerState.envKey = type;
             
-            const rgbeLoader = new RGBELoader();
-            const loadEnv = (url, useAsSky = true) => {
-                rgbeLoader.load(url, (texture) => {
-                    const envMap = pmremGenerator.fromEquirectangular(texture).texture;
-                    if (useAsSky) scene.background = texture;
-                    scene.environment = envMap;
-                    scene.environmentIntensity = useAsSky ? 1.0 : 0.45;
-                    if (!useAsSky) texture.dispose();
-                });
-            };
+            const loadEnv = (url, useAsSky = true) => applyEnvironment(url, useAsSky);
             
             if (type === 'city') {
                  // Real World Mode - Daylight
@@ -1335,6 +1376,7 @@
             // flat city levels, so Mars had no coins at all).
             spawnCoins();
             spawnEnemies(50, playerState.planetRadius, playerState.isPlanet);
+            if (renderer && renderer.shadowMap) renderer.shadowMap.needsUpdate = true;   // one pass, then frozen
         }
 
         function setupVRControllers() {
@@ -1426,11 +1468,20 @@
             mode.mesh.position.set(0, -edgeY + mh / 2, -z);
         }
 
-        function updateHUD() {
-            if (!hudPanels.score) return;
+        let hudLastDraw = 0;
+        const hudSig = {};
+        function updateHUD(force = false) {
+            if (!hudPanels.score || !playerState.hudEnabled) return;
+            // Counters don't need 90 redraws/sec; each redraw re-uploads a canvas texture.
+            const now = performance.now();
+            if (!force && now - hudLastDraw < 66) return;
+            hudLastDraw = now;
             const nav = getNavigationInfo();
 
             // ---------- score (top right) ----------
+            const scoreSig = `${coins}|${kills}|${playerState.health}|${playerState.maxHealth}`;
+            if (scoreSig !== hudSig.score) {
+            hudSig.score = scoreSig;
             const s = hudPanels.score, sx = s.ctx;
             panelBg(s, 0.26);
             sx.textBaseline = 'middle';
@@ -1457,8 +1508,14 @@
                 sx.fill();
             }
             s.texture.needsUpdate = true;
+            }
 
             // ---------- nav (bottom left) ----------
+            const navAlt = Math.max(0, Math.round(nav.alt));
+            const navHdg = Math.round(nav.heading) % 360;
+            const navSig = `${navAlt}|${navHdg}`;
+            if (navSig !== hudSig.nav) {
+            hudSig.nav = navSig;
             const n = hudPanels.nav, nx = n.ctx;
             panelBg(n, 0.24);
             nx.textBaseline = 'middle';
@@ -1470,11 +1527,16 @@
             nx.font = 'bold 32px Arial';
             nx.fillStyle = '#7fe8ff';
             nx.textAlign = 'right';
-            nx.fillText(`${Math.max(0, Math.round(nav.alt))}m`, 330, 32);
-            nx.fillText(`${String(Math.round(nav.heading) % 360).padStart(3, '0')}\u00B0`, 330, 74);
+            nx.fillText(`${navAlt}m`, 330, 32);
+            nx.fillText(`${String(navHdg).padStart(3, '0')}\u00B0`, 330, 74);
             n.texture.needsUpdate = true;
+            }
 
             // ---------- drive (bottom right) ----------
+            const boostPct = Math.round(playerState.boosterFuel / (playerState.maxBoosterFuel || 100) * 100);
+            const driveSig = `${playerState.gear}|${boostPct}`;
+            if (driveSig !== hudSig.drive) {
+            hudSig.drive = driveSig;
             const d = hudPanels.drive, dx = d.ctx;
             panelBg(d, 0.24);
             dx.textBaseline = 'middle';
@@ -1498,8 +1560,13 @@
             dx.fillStyle = frac > 0.25 ? grad : '#ff6a4d';
             roundRectPath(dx, bx, by, Math.max(2, bw * frac), bh, 8); dx.fill();
             d.texture.needsUpdate = true;
+            }
 
             // ---------- objective (bottom centre) ----------
+            const modeSig = `${gameState.mode}|${gameState.active}|${coins}|${kills}|${gameState.goal}|` +
+                            `${gameState.timeLeft.toFixed(1)}|${gameState.elapsed.toFixed(1)}`;
+            if (modeSig !== hudSig.mode) {
+            hudSig.mode = modeSig;
             const m = hudPanels.mode, mx = m.ctx;
             mx.textBaseline = 'middle';
 
@@ -1562,10 +1629,23 @@
                 mx.fillText(gameState.elapsed.toFixed(1) + 's', 536, 110);
             }
             m.texture.needsUpdate = true;
+            }
         }
 
+        function setHudEnabled(on) {
+            playerState.hudEnabled = !!on;
+            for (const p of Object.values(hudPanels)) if (p.mesh) p.mesh.visible = playerState.hudEnabled;
+            try { localStorage.setItem('supersonic_hud', playerState.hudEnabled ? '1' : '0'); } catch (e) {}
+            const btn = document.getElementById('btn-hud');
+            if (btn) btn.innerText = playerState.hudEnabled ? 'HUD: On' : 'HUD: Off';
+            if (window.vrMenu && window.vrMenu.syncHudRow) window.vrMenu.syncHudRow();
+            if (playerState.hudEnabled) updateHUD(true);
+        }
+        window.setHudEnabled = setHudEnabled;
+        window.toggleHud = () => setHudEnabled(!playerState.hudEnabled);
+
         function updateGameObjects(dt, time) {
-            const playerPos = dolly.position.clone();
+            const playerPos = _sPlayerPos.copy(dolly.position);
             for(let i=coinsGroup.children.length-1; i>=0; i--) {
                 const c = coinsGroup.children[i];
                 c.rotateY(2 * dt);   // local axis, so planet rings spin about their own normal
@@ -1588,6 +1668,12 @@
                 });
             }
         }
+
+        // Scratch objects for the per-frame path: allocating vectors every frame churns the
+        // GC and shows up as periodic hitches during long flights.
+        const _sUp = new THREE.Vector3(), _sCurUp = new THREE.Vector3(), _sAlign = new THREE.Quaternion();
+        const _sDir = new THREE.Vector3(), _sYaw = new THREE.Quaternion(), _sAxisY = new THREE.Vector3(0, 1, 0);
+        const _sTerrain = new THREE.Vector3(), _sPlayerPos = new THREE.Vector3();
 
         // --- Navigation readout (altitude above ground + compass heading) ---
         const _navTmp = { fwd: new THREE.Vector3(), up: new THREE.Vector3(), north: new THREE.Vector3(), east: new THREE.Vector3(), f: new THREE.Vector3() };
@@ -1791,8 +1877,7 @@
         
             // 3. Player Physics (Original Logic)
             if (playerState.isPlanet) {
-                const planetCenter = new THREE.Vector3(0,0,0);
-                const dist = dolly.position.distanceTo(planetCenter);
+                const dist = dolly.position.length();
                 if (dist < 1) { 
                     placePlayerAboveSurface(2);
                     // *** NEW: TELEPORT DAMAGE ***
@@ -1809,9 +1894,8 @@
                     }
                     return; 
                 }
-                const up = dolly.position.clone().normalize();
-                const gravity = up.clone().negate().multiplyScalar(9.8 * dt);
-                playerState.velocity.add(gravity);
+                const up = _sUp.copy(dolly.position).normalize();
+                playerState.velocity.addScaledVector(up, -9.8 * dt);   // gravity
                 playerState.velocity.multiplyScalar(1 - (2.0 * dt)); 
                 const surfaceHeight = planetTerrainRadius(up) + playerState.height;
                 if (dist < surfaceHeight) {
@@ -1838,16 +1922,16 @@
                         }
                     }
                 }
-                const currentUp = new THREE.Vector3(0, 1, 0).applyQuaternion(dolly.quaternion);
-                const alignmentQ = new THREE.Quaternion().setFromUnitVectors(currentUp, up);
-                dolly.quaternion.premultiply(alignmentQ);
+                const currentUp = _sCurUp.set(0, 1, 0).applyQuaternion(dolly.quaternion);
+                _sAlign.setFromUnitVectors(currentUp, up);
+                dolly.quaternion.premultiply(_sAlign);
             } else {
                 const damp = 2.0;
                 playerState.velocity.x -= playerState.velocity.x * damp * dt;
                 playerState.velocity.z -= playerState.velocity.z * damp * dt;
                 playerState.velocity.y -= playerState.velocity.y * damp * dt;
                 if (playerState.velocity.length() > 1.0) {
-                    const direction = playerState.velocity.clone().normalize();
+                    const direction = _sDir.copy(playerState.velocity).normalize();
                     raycaster.set(dolly.position, direction);
                     const hits = raycaster.intersectObjects(cityGroup.children);
                     if (hits.length > 0 && hits[0].distance < 2.0) {
@@ -1982,10 +2066,8 @@
                 // the southern hemisphere. On flat levels local up == world +Y, so
                 // the feel there is unchanged.
                 if (Math.abs(gp.axes[2]) > 0.15) {
-                    const yaw = new THREE.Quaternion().setFromAxisAngle(
-                        new THREE.Vector3(0, 1, 0), -gp.axes[2] * 2 * dt
-                    );
-                    dolly.quaternion.multiply(yaw);
+                    _sYaw.setFromAxisAngle(_sAxisY, -gp.axes[2] * 2 * dt);
+                    dolly.quaternion.multiply(_sYaw);
                 }
         
                 // THRUST: Triggers (index 0)
@@ -1996,7 +2078,7 @@
                         anyGripPressed = true;
                         playerState.turbo = true;
                     }
-                    const dir = new THREE.Vector3(0, 0, -1)
+                    const dir = _sDir.set(0, 0, -1)
                         .applyQuaternion(controller ? controller.quaternion : dolly.quaternion)
                         .applyQuaternion(dolly.quaternion)
                         .normalize();
@@ -2027,6 +2109,10 @@
             if (keyState['KeyA']) playerState.velocity.addScaledVector(right, -speed * dt);
             if (keyState['Space']) playerState.velocity.y += 20 * dt;
             if (keyState['KeyC'] || keyState['ControlLeft']) playerState.velocity.y -= 20 * dt;
+            if (keyState['KeyH'] && !buttonStates.hudKey) {   // Desktop: hide/show HUD
+                buttonStates.hudKey = true;
+                toggleHud();
+            } else if (!keyState['KeyH']) buttonStates.hudKey = false;
             if (keyState['KeyM'] && !buttonStates.modeKey) {   // Desktop: cycle flight mode
                 buttonStates.modeKey = true;
                 const idx = MODE_LIST.findIndex(m => m.id === gameState.mode);
@@ -2051,10 +2137,14 @@
                 scene.fog = new THREE.Fog(0x87CEEB, 0, 300);
                 
                 renderer = new THREE.WebGLRenderer({ antialias: true });
-                renderer.setPixelRatio(window.devicePixelRatio);
+                renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
                 renderer.setSize(window.innerWidth, window.innerHeight);
                 renderer.xr.enabled = true; 
                 renderer.shadowMap.enabled = true;
+                // Every shadow caster in this scene is static, so the shadow pass only needs to
+                // run once per level build instead of re-rendering a 2k map every frame.
+                renderer.shadowMap.autoUpdate = false;
+                renderer.shadowMap.needsUpdate = true;
                 renderer.toneMapping = THREE.ACESFilmicToneMapping;
                 document.body.appendChild(renderer.domElement);
                 document.body.appendChild(VRButton.createButton(renderer));
@@ -2088,10 +2178,11 @@
                 dirLight.position.set(100, 100, 50); dirLight.castShadow = true;
                 dirLight.shadow.camera.top = 200; dirLight.shadow.camera.bottom = -200;
                 dirLight.shadow.camera.left = -200; dirLight.shadow.camera.right = 200;
-                dirLight.shadow.mapSize.width = 4096; dirLight.shadow.mapSize.height = 4096;
+                dirLight.shadow.mapSize.width = 2048; dirLight.shadow.mapSize.height = 2048;
                 scene.add(dirLight);
 
                 initSky(); setupVRControllers(); createHUD(); createVignette();
+                try { setHudEnabled(localStorage.getItem('supersonic_hud') !== '0'); } catch (e) { setHudEnabled(true); }
                 scene.add(cityGroup); scene.add(coinsGroup); scene.add(propsGroup); scene.add(enemiesGroup);
                 generateCity('metro');
 
