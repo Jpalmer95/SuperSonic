@@ -19,6 +19,19 @@ Mars: A fully spherical planet with custom gravity physics, cratered terrain, fl
 
 Real World: Import 3D building data from any city in the world using OpenStreetMap (OSM).
 
+🎯 Flight Modes (works on every map):
+
+Free Flight: The default. Cruise, explore and listen to the radio — no timer, no objective.
+
+Ring Run: Collect 12 rings as fast as you can.
+
+Drone Hunt: Destroy 12 drones as fast as you can.
+
+Timed Run: 90 seconds, as many rings as you can grab (the course keeps restocking).
+
+Best times / best scores are saved per map in the browser. Switch modes from the VR menu
+(Mode + START / RESTART MODE) or the Flight Mode buttons on the desktop panel; press M on desktop.
+
 ⚔️ Combat System:
 
 Dual-wield laser blasters.
@@ -39,7 +52,12 @@ Full playlist queue management (Add, Remove, Reorder).
 
 Floating holographic menu system.
 
-Adjust speed gears, change locations, and manage music without leaving VR.
+Adjust speed gears, pick a flight mode, change locations, and manage music without leaving VR.
+
+📊 Flight HUD:
+
+Coins / kills / health, speed gear and boost fuel, altitude above ground and a compass heading,
+plus the live objective and timer for the current mode.
 
 🎮 Controls (Meta Quest 3)
 

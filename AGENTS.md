@@ -32,6 +32,16 @@ Two things break the level if changed naively:
 Content anchors to `dolly.position` at build time — `switchLocation()` places the player before
 `generateCity()` so rings and drones spawn near the spawn point instead of across the whole globe.
 
+## Flight modes
+
+`MODE_LIST` + `gameState` drive Free / Rings / Hunt / Timed. Mode logic lives in
+`startChallenge` / `onChallengeProgress` / `finishChallenge` / `updateChallenge`, deliberately
+outside the level builders, so every mode works in every environment — keep it that way when
+adding a mode (add an entry to `MODE_LIST`, set its `menu` label, handle any special rule in
+`updateChallenge`, and add the row only if it needs menu UI; the HUD reads `MODE_LIST` generically).
+Free flight is the default and must stay timer-free. Bests are stored per `envKey:mode` in
+`localStorage` under `supersonic_bests_v1`.
+
 ## Deployment
 Static site on GitHub Pages. Local dev server runs on port `5500`.
 

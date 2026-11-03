@@ -38,6 +38,17 @@
             transition: opacity 0.3s;
         }
 
+        #result-screen {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 200;
+            display: none; /* Flex when active */
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+
         #game-over-screen {
             position: absolute;
             top: 0; left: 0; width: 100%; height: 100%;
@@ -273,6 +284,18 @@
             <div id="loading">Loading...</div>
         </div>
 
+        <!-- Flight Mode -->
+        <div class="control-group">
+            <label>Flight Mode <span style="color:#4caf50; font-weight:normal;" id="mode-label">Free Flight</span></label>
+            <div style="display:flex; gap:5px;">
+                <button style="flex:1" onclick="setMode('free')">Free</button>
+                <button style="flex:1" onclick="setMode('rings')">Rings</button>
+                <button style="flex:1" onclick="setMode('hunt')">Hunt</button>
+                <button style="flex:1" onclick="setMode('timed')">Timed</button>
+            </div>
+            <div style="font-size:11px; color:#777;">Free flight is the default. Rings / Hunt / Timed run on any map.</div>
+        </div>
+
         <!-- Music Library -->
         <div class="control-group">
             <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -310,7 +333,11 @@
             • <strong>Boost:</strong> Hold Grip (fuel recharges)<br>
             • <strong>Gear +/-:</strong> L/R Thumbstick **CLICK** (1-10 speeds)<br>
             • <strong>Turn:</strong> Right Thumbstick **PUSH** L/R<br>
-            • <strong>Menu:</strong> B / Y
+            • <strong>Menu:</strong> B / Y<br>
+            <br>
+            <strong>Desktop Controls:</strong><br>
+            • <strong>Fly:</strong> WASD + Space/C · <strong>Shoot:</strong> F<br>
+            • <strong>Mode:</strong> M cycles Free / Rings / Hunt / Timed
         </div>
     </div>
     
@@ -319,6 +346,15 @@
         <div class="go-score" id="final-score">Score: 0</div>
         <button class="go-btn" onclick="restartGame()">REBOOT SYSTEM</button>
         <p style="margin-top:20px; color:#ff0; font-size:18px;">Press ANY Trigger in VR to Restart</p>
+    </div>
+
+    <div id="result-screen" style="background: rgba(4, 10, 6, 0.9);">
+        <div class="go-title" id="result-title">COURSE CLEAR</div>
+        <div class="go-score" id="result-summary"></div>
+        <div id="result-best" style="font-size:20px; color:#7fe8ff; margin-bottom:26px;"></div>
+        <button class="go-btn" onclick="replayMode()">FLY AGAIN</button>
+        <button class="go-btn" style="background:#333; margin-top:12px;" onclick="setMode('free')">BACK TO FREE FLIGHT</button>
+        <p style="margin-top:18px; color:#ff0; font-size:16px;">Press ANY Trigger in VR to Fly Again</p>
     </div>
     
     <div id="error-log"></div>
@@ -355,7 +391,9 @@
         let propsGroup = new THREE.Group(); 
         let enemiesGroup = new THREE.Group();
         let projectiles = []; 
-
+        let effects = [];        // short-lived particle bursts (drone kills, laser impacts)
+        let vignetteMesh;        // camera-attached speed streaks
+        let puffTexture;
         let sky, sun;
         let starSystem;
         let pmremGenerator;
@@ -369,6 +407,28 @@
         // Game State
         let coins = 0;
         let kills = 0;
+
+        // --- Challenge modes (work in every environment; free flight is the default) ---
+        const MODE_LIST = [
+            { id: 'free',  label: 'Free Flight', menu: 'Free' },
+            { id: 'rings', label: 'Ring Run',    menu: 'Rings',    goal: 12, target: 'coins' },
+            { id: 'hunt',  label: 'Drone Hunt',  menu: 'Hunt',     goal: 12, target: 'kills' },
+            { id: 'timed', label: 'Timed Run',   menu: 'Timed',    seconds: 90 }
+        ];
+        const gameState = {
+            mode: 'free',        // free | rings | hunt | timed
+            active: false,       // a challenge is running (free is always false)
+            goal: 0,
+            target: 'coins',
+            timeLeft: 0,
+            elapsed: 0,
+            resultOpen: false,
+            bests: {}
+        };
+        try { gameState.bests = JSON.parse(localStorage.getItem('supersonic_bests_v1') || '{}') || {}; } catch (e) { gameState.bests = {}; }
+        function saveBests() { try { localStorage.setItem('supersonic_bests_v1', JSON.stringify(gameState.bests)); } catch (e) {} }
+        function getModeDef(id) { return MODE_LIST.find(m => m.id === id) || MODE_LIST[0]; }
+
         const playerState = {
             flying: true, 
             velocity: new THREE.Vector3(),
@@ -423,19 +483,30 @@
                 scene.add(this.cursor);
         
                 this.options = [
-                    { label: "Location", type: "select", values: ["Metro", "Neon", "Mars", "Austin"], current: 0, y: 120 },
-                    { label: "TRAVEL TO SELECTED", type: "action", action: "warp", y: 170 },
-                    { label: "Speed Gear", type: "slider", min: 1, max: 10, current: 5, y: 230 },
-                    { label: "Toggle Music", type: "action", action: "toggle", y: 290 },
-                    { label: "Next Track", type: "action", action: "next", y: 350 },
-                    { label: "Close Menu", type: "action", action: "close", y: 410 }
+                    { label: "Location", type: "select", values: ["Metro", "Neon", "Mars", "Austin"], current: 0, y: 95 },
+                    { label: "TRAVEL TO SELECTED", type: "action", action: "warp", y: 138 },
+                    { label: "Mode", type: "select", values: ["Free", "Rings", "Hunt", "Timed"], current: 0, y: 186 },
+                    { label: "START / RESTART MODE", type: "action", action: "startmode", y: 229 },
+                    { label: "Speed Gear", type: "slider", min: 1, max: 10, current: 5, y: 272 },
+                    { label: "Toggle Music", type: "action", action: "toggle", y: 315 },
+                    { label: "Next Track", type: "action", action: "next", y: 358 },
+                    { label: "Close Menu", type: "action", action: "close", y: 401 }
                 ];
                 this.hoverIndex = -1;
                 this.redraw();
             }
         
+            syncModeRow() {
+                const modeOpt = this.options.find(o => o.label === "Mode");
+                if (!modeOpt) return;
+                const def = getModeDef(gameState.mode);
+                const idx = modeOpt.values.indexOf(def.menu);
+                if (idx >= 0) modeOpt.current = idx;
+                this.redraw();
+            }
+
             toggle() {
-                if (playerState.isGameOver) return;
+                if (playerState.isGameOver || gameState.resultOpen) return;
                 this.mesh.visible = !this.mesh.visible;
                 this.cursor.visible = this.mesh.visible;
                 playerState.menuOpen = this.mesh.visible;
@@ -449,7 +520,8 @@
                     spawnPos.y = camera.position.y + dolly.position.y;
                     this.mesh.position.copy(spawnPos);
                     this.mesh.lookAt(camera.position.clone().add(dolly.position));
-                    this.options[2].current = playerState.gear;   // <-- fixed to real gear
+                    this.options.find(o => o.label === "Speed Gear").current = playerState.gear;
+                    this.syncModeRow();
                     this.mesh.updateMatrixWorld(true);
                     this.redraw();
                 }
@@ -471,7 +543,7 @@
                     const uv = intersects[0].uv;
                     const canvasY = (1 - uv.y) * 512;
                     let newHover = -1;
-                    this.options.forEach((opt, i) => { if (Math.abs(canvasY - opt.y) < 25) newHover = i; });
+                    this.options.forEach((opt, i) => { if (Math.abs(canvasY - opt.y) < 19) newHover = i; });
                     if (this.hoverIndex !== newHover) { this.hoverIndex = newHover; this.redraw(); }
                     return true; 
                 } else {
@@ -492,6 +564,15 @@
                     const loc = locOpt.values[locOpt.current];
                     if (loc === "Austin") window.loadAustin(); else window.switchLocation(loc.toLowerCase());
                     this.toggle();
+                }
+                else if (opt.label === "Mode") {
+                    opt.current = (opt.current + 1) % opt.values.length;
+                }
+                else if (opt.label === "START / RESTART MODE") {
+                    const modeOpt = this.options.find(o => o.label === "Mode");
+                    const picked = MODE_LIST.find(m => m.menu === modeOpt.values[modeOpt.current]) || MODE_LIST[0];
+                    startChallenge(picked.id);
+                    this.toggle();   // get out of the way so the run starts immediately
                 }
                 else if (opt.label === "Speed Gear") {
                     opt.current++; if(opt.current > opt.max) opt.current = opt.min;
@@ -553,9 +634,9 @@
                 this.redraw();
             }
         
-            show(score) {
+            show(payload) {
                 this.mesh.visible = true;
-                this.redraw(score);
+                this.redraw(payload);
                 
                 // Position in front of camera
                 const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
@@ -570,23 +651,33 @@
                 this.mesh.visible = false;
             }
         
-            redraw(score = 0) {
+            // payload: { title, summary, best, good } — or a plain number for a game over
+            redraw(payload = {}) {
+                const p = (typeof payload === 'number') ? { title: 'SYSTEM FAILURE', summary: `FINAL SCORE: ${payload}` } : (payload || {});
+                const title = p.title || 'SYSTEM FAILURE';
+                const accent = p.good === false ? '#ff3333' : '#4caf50';
                 const ctx = this.ctx; const w = this.canvas.width; const h = this.canvas.height;
-                ctx.fillStyle = "rgba(30, 0, 0, 0.95)"; ctx.fillRect(0, 0, w, h);
-                ctx.strokeStyle = "#ff3333"; ctx.lineWidth = 12; ctx.strokeRect(20, 20, w-40, h-40);
+                ctx.fillStyle = "rgba(10, 14, 10, 0.95)"; ctx.fillRect(0, 0, w, h);
+                ctx.strokeStyle = accent; ctx.lineWidth = 12; ctx.strokeRect(20, 20, w-40, h-40);
                 
-                ctx.fillStyle = "#ff3333"; ctx.font = "bold 52px Arial"; ctx.textAlign = "center";
-                ctx.fillText("SYSTEM FAILURE", w/2, 140);
+                ctx.textAlign = "center";
+                ctx.fillStyle = accent; ctx.font = "bold 52px Arial";
+                ctx.fillText(title, w/2, 130);
                 
-                ctx.fillStyle = "#ffff00"; ctx.font = "bold 36px Arial";
-                ctx.fillText(`FINAL SCORE: ${score}`, w/2, 220);
+                ctx.fillStyle = "#ffff00"; ctx.font = "bold 34px Arial";
+                ctx.fillText(p.summary || '', w/2, 215);
+                
+                if (p.best) {
+                    ctx.fillStyle = "#7fe8ff"; ctx.font = "bold 26px Arial";
+                    ctx.fillText(p.best, w/2, 262);
+                }
                 
                 ctx.fillStyle = "#ffffff"; ctx.font = "28px Arial";
-                ctx.fillText("PRESS ANY TRIGGER", w/2, 300);
-                ctx.fillText("TO REBOOT SYSTEM", w/2, 340);
+                ctx.fillText("PRESS ANY TRIGGER", w/2, 330);
+                ctx.fillText("TO FLY AGAIN", w/2, 370);
                 
                 ctx.fillStyle = "#888888"; ctx.font = "18px Arial";
-                ctx.fillText("or click REBOOT on the floating panel", w/2, 420);
+                ctx.fillText("or click FLY AGAIN on the panel", w/2, 440);
                 
                 this.texture.needsUpdate = true;
             }
@@ -739,9 +830,13 @@
         function spawnProjectile(controller) {
             if (!controller) return;
             if (laserSound.isPlaying) laserSound.stop(); laserSound.play();
-            const geo = new THREE.CylinderGeometry(0.02, 0.02, 1, 8);
+            // Longer, additive tracer: reads as a bolt of light instead of a thin stick.
+            const geo = new THREE.CylinderGeometry(0.03, 0.03, 3.2, 8);
             geo.rotateX(-Math.PI / 2);
-            const mat = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+            const mat = new THREE.MeshBasicMaterial({
+                color: 0x88ffcc, blending: THREE.AdditiveBlending,
+                transparent: true, opacity: 0.95, depthWrite: false
+            });
             const bullet = new THREE.Mesh(geo, mat);
             const pos = new THREE.Vector3(); const dir = new THREE.Vector3();
             controller.getWorldPosition(pos);
@@ -750,6 +845,115 @@
             bullet.position.copy(pos); bullet.lookAt(pos.clone().add(dir));
             bullet.userData = { velocity: dir.multiplyScalar(150), life: 2.0 };
             scene.add(bullet); projectiles.push(bullet);
+        }
+
+        // --- Speed vignette (camera-attached, so it works in VR and on desktop) ---
+        function createSpeedStreakTexture() {
+            const size = 512;
+            const c = document.createElement('canvas'); c.width = c.height = size;
+            const ctx = c.getContext('2d');
+            const g = ctx.createRadialGradient(size/2, size/2, size*0.16, size/2, size/2, size*0.52);
+            g.addColorStop(0.0, 'rgba(255,255,255,0)');
+            g.addColorStop(0.6, 'rgba(190,225,255,0.10)');
+            g.addColorStop(1.0, 'rgba(225,245,255,0.72)');
+            ctx.fillStyle = g; ctx.fillRect(0, 0, size, size);
+            ctx.lineCap = 'round';
+            for (let i = 0; i < 130; i++) {
+                const a = Math.random() * Math.PI * 2;
+                const r0 = size * (0.30 + Math.random() * 0.10);
+                const r1 = size * (0.47 + Math.random() * 0.13);
+                ctx.strokeStyle = `rgba(255,255,255,${0.05 + Math.random() * 0.28})`;
+                ctx.lineWidth = 1 + Math.random() * 2.5;
+                ctx.beginPath();
+                ctx.moveTo(size/2 + Math.cos(a)*r0, size/2 + Math.sin(a)*r0);
+                ctx.lineTo(size/2 + Math.cos(a)*r1, size/2 + Math.sin(a)*r1);
+                ctx.stroke();
+            }
+            return new THREE.CanvasTexture(c);
+        }
+
+        function createVignette() {
+            const mat = new THREE.MeshBasicMaterial({
+                map: createSpeedStreakTexture(), transparent: true, opacity: 0,
+                depthTest: false, depthWrite: false, side: THREE.DoubleSide
+            });
+            vignetteMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.7), mat);
+            vignetteMesh.position.set(0, 0, -0.45);
+            vignetteMesh.renderOrder = 996;
+            vignetteMesh.visible = false;
+            camera.add(vignetteMesh);
+            resizeVignette();
+        }
+
+        // Map the streak texture onto the actual view frustum, otherwise the ring band
+        // lands outside the vertical FOV and the effect only shows at the left/right edges.
+        function resizeVignette() {
+            if (!vignetteMesh || !camera) return;
+            const dist = 0.45, overscan = 1.25;
+            const h = 2 * dist * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+            const w = h * (camera.aspect || 1.78);
+            vignetteMesh.scale.set((w / 1.7) * overscan, (h / 1.7) * overscan, 1);
+        }
+
+        function updateVignette(dt) {
+            if (!vignetteMesh) return;
+            const speed = playerState.velocity.length();
+            // Drag caps cruise speed near accel/2 (~75 m/s at gear 5), so the ramp starts low.
+            const speedT = THREE.MathUtils.clamp((speed - 30) / 170, 0, 1);
+            const target = Math.min(1, speedT * 0.7 + (playerState.turbo ? 0.4 : 0));
+            const m = vignetteMesh.material;
+            m.opacity += (target - m.opacity) * Math.min(1, dt * 5);
+            vignetteMesh.visible = m.opacity > 0.012;
+        }
+
+        // --- Particle bursts ---
+        function getPuffTexture() {
+            if (!puffTexture) puffTexture = createStarTexture();
+            return puffTexture;
+        }
+
+        function spawnExplosion(position, color = 0xffaa33, count = 14, spread = 9) {
+            const verts = new Float32Array(count * 3);
+            const velocities = [];
+            for (let i = 0; i < count; i++) {
+                velocities.push(new THREE.Vector3(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5)
+                    .normalize().multiplyScalar(spread * (0.4 + Math.random())));
+            }
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+            const mat = new THREE.PointsMaterial({
+                color, size: 2.0, map: getPuffTexture(), transparent: true,
+                depthWrite: false, blending: THREE.AdditiveBlending, fog: false
+            });
+            const pts = new THREE.Points(geo, mat);
+            pts.position.copy(position);
+            scene.add(pts);
+            effects.push({ pts, velocities, life: 0.75, maxLife: 0.75 });
+        }
+
+        function updateEffects(dt) {
+            for (let i = effects.length - 1; i >= 0; i--) {
+                const e = effects[i];
+                e.life -= dt;
+                if (e.life <= 0) {
+                    scene.remove(e.pts);
+                    e.pts.geometry.dispose();
+                    e.pts.material.dispose();
+                    effects.splice(i, 1);
+                    continue;
+                }
+                const arr = e.pts.geometry.attributes.position.array;
+                for (let j = 0; j < e.velocities.length; j++) {
+                    arr[j*3]   += e.velocities[j].x * dt;
+                    arr[j*3+1] += e.velocities[j].y * dt;
+                    arr[j*3+2] += e.velocities[j].z * dt;
+                    e.velocities[j].multiplyScalar(1 - 1.8 * dt);
+                }
+                e.pts.geometry.attributes.position.needsUpdate = true;
+                const t = 1 - e.life / e.maxLife;
+                e.pts.material.opacity = 1 - t;
+                e.pts.material.size = 2.0 + t * 4.5;
+            }
         }
 
         function spawnEnemies(count, radius, isPlanet) {
@@ -920,29 +1124,40 @@
                 .normalize().multiplyScalar(radius);
         }
 
-        function spawnCoins() {
-            const coinGeo = new THREE.TorusGeometry(1, 0.3, 8, 24);
-            const coinMat = new THREE.MeshStandardMaterial({ color: 0xFFD700, metalness: 1, roughness: 0.1, emissive: 0xFFAA00, emissiveIntensity: 0.5 });
-            const LOCAL_UP = new THREE.Vector3(0, 1, 0);
-            for(let i=0; i<30; i++) {
-                const coin = new THREE.Mesh(coinGeo, coinMat); 
-                if (playerState.isPlanet) {
-                     // Rings hover above the terrain near the player and stand upright on the
-                     // local surface (torus plane contains the surface normal) so they read as
-                     // rings from any angle instead of thin slivers.
-                     const centerUp = dolly.position.clone().normalize();
-                     const radius = playerState.planetRadius + 25 + Math.random()*65;
-                     const point = randomNearbySurfacePoint(centerUp, radius, 120 + Math.random()*380);
-                     // keep the ring clear of the terrain underneath it
-                     point.setLength(planetTerrainRadius(point.clone().normalize()) + 22 + Math.random()*55);
-                     coin.position.copy(point);
-                     coin.scale.setScalar(2.2);   // rings read (and are hittable) at planet scale
-                     coin.quaternion.setFromUnitVectors(LOCAL_UP, point.clone().normalize());
-                } else {
-                    coin.position.set((Math.random()-0.5)*500, 40 + Math.random()*40, (Math.random()-0.5)*500);
-                }
-                coinsGroup.add(coin);
+        let coinGeo, coinMat;
+        function getCoinAssets() {
+            if (!coinGeo) {
+                coinGeo = new THREE.TorusGeometry(1, 0.3, 8, 24);
+                coinMat = new THREE.MeshStandardMaterial({ color: 0xFFD700, metalness: 1, roughness: 0.1, emissive: 0xFFAA00, emissiveIntensity: 0.5 });
             }
+            return { geo: coinGeo, mat: coinMat };
+        }
+
+        function spawnCoin() {
+            const { geo, mat } = getCoinAssets();
+            const LOCAL_UP = new THREE.Vector3(0, 1, 0);
+            const coin = new THREE.Mesh(geo, mat);
+            if (playerState.isPlanet) {
+                 // Rings hover above the terrain near the player and stand upright on the
+                 // local surface (torus plane contains the surface normal) so they read as
+                 // rings from any angle instead of thin slivers.
+                 const centerUp = dolly.position.clone().normalize();
+                 const radius = playerState.planetRadius + 25 + Math.random()*65;
+                 const point = randomNearbySurfacePoint(centerUp, radius, 120 + Math.random()*380);
+                 // keep the ring clear of the terrain underneath it
+                 point.setLength(planetTerrainRadius(point.clone().normalize()) + 22 + Math.random()*55);
+                 coin.position.copy(point);
+                 coin.scale.setScalar(2.2);   // rings read (and are hittable) at planet scale
+                 coin.quaternion.setFromUnitVectors(LOCAL_UP, point.clone().normalize());
+            } else {
+                coin.position.set((Math.random()-0.5)*500, 40 + Math.random()*40, (Math.random()-0.5)*500);
+            }
+            coinsGroup.add(coin);
+            return coin;
+        }
+
+        function spawnCoins() {
+            for(let i=0; i<30; i++) spawnCoin();
         }
 
         function initSky() {
@@ -969,6 +1184,7 @@
             if (sky) sky.visible = type !== 'mars';   // no atmosphere dome in space
             let buildingColors; let density = 150; let isNight = false;
             playerState.isPlanet = false;
+            playerState.envKey = type;
             
             const rgbeLoader = new RGBELoader();
             const loadEnv = (url, useAsSky = true) => {
@@ -1132,14 +1348,14 @@
 
         function createHUD() {
             hudCanvas = document.createElement('canvas');
-            hudCanvas.width = 512; hudCanvas.height = 128;
+            hudCanvas.width = 512; hudCanvas.height = 184;
             hudCtx = hudCanvas.getContext('2d');
             hudTexture = new THREE.CanvasTexture(hudCanvas);
             
             const mat = new THREE.MeshBasicMaterial({ map: hudTexture, transparent: true, opacity: 0.8, depthTest: false });
-            const geo = new THREE.PlaneGeometry(0.5, 0.125);
+            const geo = new THREE.PlaneGeometry(0.5, 0.18);
             hudMesh = new THREE.Mesh(geo, mat);
-            hudMesh.position.set(0, -0.2, -0.5);
+            hudMesh.position.set(0, -0.22, -0.5);
             hudMesh.renderOrder = 999;
             camera.add(hudMesh);
             updateHUD();
@@ -1147,19 +1363,38 @@
 
         function updateHUD() {
             if(!hudCtx) return;
-            hudCtx.clearRect(0,0,512,128);
+            const W = 512, H = 184;
+            hudCtx.clearRect(0,0,W,H);
             hudCtx.fillStyle = "rgba(0,0,0,0.6)";
-            hudCtx.fillRect(0,0,512,128);
-            
-            hudCtx.font = "bold 36px Arial";
-            hudCtx.fillStyle = "#00ff00";
+            hudCtx.fillRect(0,0,W,H);
             hudCtx.textAlign = "center";
-            hudCtx.fillText(`Coins: ${coins}  Kills: ${kills}  HP: ${playerState.health}`, 256, 55);
-            
-            hudCtx.font = "bold 28px Arial";
+
+            hudCtx.font = "bold 34px Arial";
+            hudCtx.fillStyle = "#00ff00";
+            hudCtx.fillText(`Coins: ${coins}  Kills: ${kills}  HP: ${playerState.health}`, W/2, 42);
+
+            hudCtx.font = "bold 26px Arial";
             hudCtx.fillStyle = "#ffff00";
-            hudCtx.fillText(`GEAR ${playerState.gear}   BOOST ${Math.floor(playerState.boosterFuel)}%`, 256, 95);
-            
+            hudCtx.fillText(`GEAR ${playerState.gear}   BOOST ${Math.floor(playerState.boosterFuel)}%`, W/2, 76);
+
+            const nav = getNavigationInfo();
+            hudCtx.fillStyle = "#7fe8ff";
+            hudCtx.fillText(`ALT ${Math.max(0, Math.round(nav.alt))}m   HDG ${String(Math.round(nav.heading) % 360).padStart(3,'0')}\u00B0`, W/2, 110);
+
+            // Mode / objective line
+            if (gameState.mode === 'free' && !gameState.active) {
+                hudCtx.fillStyle = "#9a9a9a";
+                hudCtx.fillText("FREE FLIGHT", W/2, 148);
+            } else if (gameState.mode === 'timed') {
+                hudCtx.fillStyle = (gameState.active && gameState.timeLeft < 10) ? "#ff5555" : "#ffaa33";
+                hudCtx.fillText(`TIMED RUN   ${coins} RINGS   ${gameState.active ? gameState.timeLeft.toFixed(1) + 's' : 'END'}`, W/2, 148);
+            } else {
+                const def = getModeDef(gameState.mode);
+                const done = gameState.target === 'coins' ? coins : kills;
+                hudCtx.fillStyle = "#ffaa33";
+                hudCtx.fillText(`${def.label.toUpperCase()}   ${Math.min(done, gameState.goal)}/${gameState.goal}   ${gameState.elapsed.toFixed(1)}s`, W/2, 148);
+            }
+
             if (hudTexture) hudTexture.needsUpdate = true;
         }
 
@@ -1171,6 +1406,8 @@
                 if (playerPos.distanceTo(c.position) < 5) {
                     coinsGroup.remove(c);
                     coins++;
+                    onChallengeProgress();
+                    if (gameState.active && gameState.mode === 'timed') spawnCoin();   // keep the course stocked
                     if(coinSound.isPlaying) coinSound.stop(); coinSound.play();
                     updateHUD();
                 }
@@ -1186,6 +1423,130 @@
             }
         }
 
+        // --- Navigation readout (altitude above ground + compass heading) ---
+        const _navTmp = { fwd: new THREE.Vector3(), up: new THREE.Vector3(), north: new THREE.Vector3(), east: new THREE.Vector3(), f: new THREE.Vector3() };
+        function getNavigationInfo() {
+            const { fwd, up, north, east, f } = _navTmp;
+            fwd.set(0, 0, -1).applyQuaternion(camera.quaternion).applyQuaternion(dolly.quaternion);
+            let alt;
+            if (playerState.isPlanet) {
+                up.copy(dolly.position).normalize();
+                alt = dolly.position.length() - planetTerrainRadius(up);
+            } else {
+                up.set(0, 1, 0);
+                alt = dolly.position.y;
+            }
+            // Compass reference: "north" is world +Y (toward the pole on a globe, -Z on flat
+            // maps), projected into the local tangent plane. Degenerate exactly at the pole,
+            // where it falls back to -Z.
+            north.set(0, 1, 0).addScaledVector(up, -up.y);
+            if (north.lengthSq() < 1e-4) north.set(0, 0, -1).addScaledVector(up, up.z);
+            north.normalize();
+            east.crossVectors(up, north).normalize();
+            f.copy(fwd).addScaledVector(up, -fwd.dot(up));
+            if (f.lengthSq() > 1e-6) f.normalize(); else f.copy(north);
+            let deg = Math.atan2(f.dot(east), f.dot(north)) * 180 / Math.PI;
+            if (deg < 0) deg += 360;
+            return { alt, heading: deg };
+        }
+
+        // --- Challenge mode plumbing (mode logic lives outside the level builders, so
+        //     every mode works in every environment) ---
+        function challengeKey() { return `${playerState.envKey || 'metro'}:${gameState.mode}`; }
+
+        function startChallenge(modeId) {
+            const def = getModeDef(modeId);
+            gameState.mode = def.id;
+            gameState.resultOpen = false;
+            hideResult();
+            coins = 0; kills = 0;
+            playerState.health = playerState.maxHealth;
+            playerState.velocity.set(0, 0, 0);
+
+            if (def.id === 'free') {
+                gameState.active = false; gameState.goal = 0; gameState.target = 'coins';
+                gameState.timeLeft = 0; gameState.elapsed = 0;
+            } else {
+                gameState.active = true;
+                gameState.goal = def.goal || 0;
+                gameState.target = def.target || 'coins';
+                gameState.timeLeft = def.seconds || 0;
+                gameState.elapsed = 0;
+                // fresh course around the player's current position
+                while (coinsGroup.children.length > 0) coinsGroup.remove(coinsGroup.children[0]);
+                spawnCoins();
+                if (def.id === 'hunt') spawnEnemies(50, playerState.planetRadius, playerState.isPlanet);
+            }
+            const modeLabel = document.getElementById('mode-label');
+            if (modeLabel) modeLabel.innerText = def.label;
+            updateHUD();
+            if (window.vrMenu && window.vrMenu.syncModeRow) window.vrMenu.syncModeRow();
+        }
+
+        function onChallengeProgress() {
+            if (!gameState.active) return;
+            if (gameState.target === 'coins' && coins >= gameState.goal) finishChallenge(true);
+            else if (gameState.target === 'kills' && kills >= gameState.goal) finishChallenge(true);
+        }
+
+        function finishChallenge(success) {
+            if (!gameState.active) return;
+            gameState.active = false;
+            const def = getModeDef(gameState.mode);
+            const key = challengeKey();
+            const score = coins + kills * 5;
+            let summary = '', bestLine = '';
+
+            if (gameState.mode === 'timed') {
+                const prev = gameState.bests[key] || 0;
+                if (coins > prev) { gameState.bests[key] = coins; saveBests(); bestLine = `NEW BEST: ${coins} rings`; }
+                else bestLine = `BEST: ${prev} rings`;
+                summary = `${coins} rings · ${kills} drones · score ${score}`;
+            } else {
+                const t = Math.max(0.1, gameState.elapsed);
+                const prev = gameState.bests[key] || 0;
+                if (prev === 0 || t < prev) { gameState.bests[key] = +t.toFixed(1); saveBests(); bestLine = `NEW BEST: ${t.toFixed(1)}s`; }
+                else bestLine = `BEST: ${prev.toFixed(1)}s`;
+                summary = `${gameState.goal} ${gameState.target === 'coins' ? 'rings' : 'drones'} · ${t.toFixed(1)}s · score ${score}`;
+            }
+
+            const title = gameState.mode === 'timed' ? "TIME'S UP" : (success ? 'COURSE CLEAR' : 'RUN OVER');
+            gameState.resultOpen = true;
+            showResult(title, summary, bestLine, gameState.mode === 'timed' || success);
+            updateHUD();
+        }
+
+        function updateChallenge(dt) {
+            if (!gameState.active) return;
+            gameState.elapsed += dt;
+            if (gameState.mode === 'timed') {
+                gameState.timeLeft -= dt;
+                if (gameState.timeLeft <= 0) { gameState.timeLeft = 0; finishChallenge(false); }
+            }
+        }
+
+        function showResult(title, summary, bestLine, good) {
+            const el = document.getElementById('result-screen');
+            if (el) {
+                const t = document.getElementById('result-title');
+                t.innerText = title;
+                t.style.color = good ? '#4caf50' : '#ffaa33';
+                document.getElementById('result-summary').innerText = summary;
+                document.getElementById('result-best').innerText = bestLine;
+                el.style.display = 'flex';
+                document.getElementById('ui-container').style.opacity = '0.25';
+            }
+            if (window.vrGameOver) window.vrGameOver.show({ title, summary, best: bestLine, good });
+        }
+
+        function hideResult() {
+            const el = document.getElementById('result-screen');
+            if (el) el.style.display = 'none';
+            const ui = document.getElementById('ui-container');
+            if (ui && !playerState.isGameOver) ui.style.opacity = '1';
+            if (window.vrGameOver) window.vrGameOver.hide();
+        }
+
         function updatePhysics(dt, time) {
             // 1. Menu Safety
             if(playerState.menuOpen) {
@@ -1194,8 +1555,8 @@
                 return;
             }
         
-            // *** NEW: GAME OVER SAFETY ***
-            if(playerState.isGameOver) {
+            // *** GAME OVER / RESULT SCREEN SAFETY ***
+            if(playerState.isGameOver || gameState.resultOpen) {
                 playerState.velocity.set(0,0,0);
                 return;
             }
@@ -1226,9 +1587,11 @@
                 for(let j=enemiesGroup.children.length-1; j>=0; j--) {
                     const e = enemiesGroup.children[j];
                     if (p.position.distanceTo(e.position) < 5) { // Hitbox size
+                        spawnExplosion(e.position, 0xff6633, 16, 11);
                         enemiesGroup.remove(e);
                         if(boomSound.isPlaying) boomSound.stop(); boomSound.play();
                         kills++;
+                        onChallengeProgress();
                         updateHUD();
                         hit = true;
                         break;
@@ -1357,6 +1720,7 @@
             if (playerState.velocity.length() > 1000) playerState.velocity.setLength(1000);
             handleFlightInput(dt, time);
             handleDesktopInput(dt);
+            updateChallenge(dt);
             dolly.position.addScaledVector(playerState.velocity, dt);
             
             updateHUD();
@@ -1403,8 +1767,8 @@
                 }
             }
         
-            // Game Over restart (any trigger)
-            if (playerState.isGameOver) {
+            // Game Over / result screen restart (any trigger)
+            if (playerState.isGameOver || gameState.resultOpen) {
                 for (const source of session.inputSources) {
                     if (source.gamepad && source.gamepad.buttons[0]?.pressed) {
                         if (!buttonStates.trigger) {
@@ -1464,6 +1828,7 @@
                     if (gp.buttons[1]?.pressed && playerState.boosterFuel > 5) {
                         boost = 3.8;
                         anyGripPressed = true;
+                        playerState.turbo = true;
                     }
                     const dir = new THREE.Vector3(0, 0, -1)
                         .applyQuaternion(controller ? controller.quaternion : dolly.quaternion)
@@ -1473,6 +1838,8 @@
                 }
             }
         
+            if (!anyGripPressed) playerState.turbo = false;
+
             // Booster fuel
             if (anyGripPressed) {
                 playerState.boosterFuel -= playerState.boosterDrainRate * dt;
@@ -1494,6 +1861,11 @@
             if (keyState['KeyA']) playerState.velocity.addScaledVector(right, -speed * dt);
             if (keyState['Space']) playerState.velocity.y += 20 * dt;
             if (keyState['KeyC'] || keyState['ControlLeft']) playerState.velocity.y -= 20 * dt;
+            if (keyState['KeyM'] && !buttonStates.modeKey) {   // Desktop: cycle flight mode
+                buttonStates.modeKey = true;
+                const idx = MODE_LIST.findIndex(m => m.id === gameState.mode);
+                setMode(MODE_LIST[(idx + 1) % MODE_LIST.length].id);
+            } else if (!keyState['KeyM']) buttonStates.modeKey = false;
             if (keyState['KeyF']) { // Desktop Fire
                 const time = clock.getElapsedTime();
                  if (!playerState.lastFire || time - playerState.lastFire > 0.2) {
@@ -1553,12 +1925,14 @@
                 dirLight.shadow.mapSize.width = 4096; dirLight.shadow.mapSize.height = 4096;
                 scene.add(dirLight);
 
-                initSky(); setupVRControllers(); createHUD();
+                initSky(); setupVRControllers(); createHUD(); createVignette();
                 scene.add(cityGroup); scene.add(coinsGroup); scene.add(propsGroup); scene.add(enemiesGroup);
                 generateCity('metro');
 
-                document.addEventListener('keydown', (e) => keyState[e.code] = true);
-                document.addEventListener('keyup', (e) => keyState[e.code] = false);
+                // Don't steal keys from the city search box
+                const isTyping = (e) => { const t = e.target; return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable); };
+                document.addEventListener('keydown', (e) => { if (isTyping(e)) return; keyState[e.code] = true; });
+                document.addEventListener('keyup', (e) => { if (isTyping(e)) return; keyState[e.code] = false; });
                 
                 document.body.addEventListener('click', () => {
                     if (listener.context.state === 'suspended') listener.context.resume();
@@ -1574,13 +1948,15 @@
             }
         }
         
-        function onWindowResize() { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); }
+        function onWindowResize() { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); resizeVignette(); }
         function render() { 
             const dt = Math.min(clock.getDelta(), 0.1); 
             const time = clock.getElapsedTime();
             
             updateGameObjects(dt, time); 
             updatePhysics(dt, time); 
+            updateEffects(dt);
+            updateVignette(dt);
             controllers.forEach(c => { const line = c.getObjectByName('line'); if(line) line.visible = playerState.menuOpen; });
 
             renderer.render(scene, camera); 
@@ -1611,7 +1987,8 @@
             
             document.getElementById('game-over-screen').style.display = 'none';
             document.getElementById('ui-container').style.opacity = '1';
-            
+            gameState.resultOpen = false;
+            hideResult();
             if (window.vrGameOver) window.vrGameOver.hide();
             
             // Reset player position
@@ -1620,8 +1997,14 @@
             } else {
                  dolly.position.set(0,0,0);
             }
+            // Re-arm whatever mode is selected (free flight just clears the counters)
+            startChallenge(gameState.mode);
             updateHUD();
         };
+
+        // Desktop/UI entry points for the challenge modes
+        window.replayMode = function() { window.restartGame(); };
+        window.setMode = function(id) { startChallenge(id); };
 
         // --- GLOBAL EXPORTS ---
         window.loadAustin = function() {
