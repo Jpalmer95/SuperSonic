@@ -15,7 +15,7 @@ Metro City: A dense, procedurally generated metropolis with day/night cycles.
 
 Neon Cyberpunk: A dark, glowing synth-wave city.
 
-Mars: A fully spherical planet with custom gravity physics and craters.
+Mars: A fully spherical planet with custom gravity physics, cratered terrain, floating collectible rings and patrolling drones.
 
 Real World: Import 3D building data from any city in the world using OpenStreetMap (OSM).
 

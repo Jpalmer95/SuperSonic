@@ -359,6 +359,8 @@
         let sky, sun;
         let starSystem;
         let pmremGenerator;
+        // Per-environment fog, restored every frame after the damage flash
+        let envFogColor = 0x87CEEB, envFogNear = 0, envFogFar = 300;
         
         // HUD
         let hudTexture, hudMesh;
@@ -753,12 +755,19 @@
         function spawnEnemies(count, radius, isPlanet) {
             while(enemiesGroup.children.length > 0) enemiesGroup.remove(enemiesGroup.children[0]);
             const geo = new THREE.OctahedronGeometry(2, 0);
-            const mat = new THREE.MeshStandardMaterial({ color: 0xff0000, metalness: 0.5, roughness: 0.2 });
+            const mat = new THREE.MeshStandardMaterial({ color: 0xff0000, metalness: 0.5, roughness: 0.2, emissive: 0x550000 });
+            const centerUp = dolly.position.clone().normalize();
             for(let i=0; i<count; i++) {
                 const mesh = new THREE.Mesh(geo, mat);
                 if (isPlanet) {
-                    const vec = new THREE.Vector3((Math.random()-0.5), (Math.random()-0.5), (Math.random()-0.5)).normalize().multiplyScalar(radius + 30 + Math.random()*100);
-                    mesh.position.copy(vec);
+                    // Half of the drones patrol the area the player actually starts in;
+                    // the rest are scattered so the globe isn't empty when you explore.
+                    if (i < count * 0.5) {
+                        mesh.position.copy(randomNearbySurfacePoint(centerUp, radius + 30 + Math.random()*90, 150 + Math.random()*450));
+                    } else {
+                        const vec = new THREE.Vector3((Math.random()-0.5), (Math.random()-0.5), (Math.random()-0.5)).normalize().multiplyScalar(radius + 30 + Math.random()*100);
+                        mesh.position.copy(vec);
+                    }
                 } else {
                     mesh.position.set((Math.random()-0.5)*800, 20 + Math.random()*60, (Math.random()-0.5)*800);
                 }
@@ -802,17 +811,78 @@
             return tex;
         }
 
+        // Analytic terrain height of the Mars globe at a unit direction. The sphere mesh is
+        // displaced by craters + rolling noise, so collisions have to use the same function
+        // or the player clips through hills and floats over crater floors.
+        let planetCraters = [];
+        function planetTerrainRadius(dirUnit) {
+            const v = dirUnit.clone().multiplyScalar(playerState.planetRadius);
+            let disp = 0;
+            for (const c of planetCraters) {
+                const t = v.distanceTo(c.vec) / c.radius;
+                if (t < 1) disp += -(1 - t * t) * c.depth + Math.exp(-Math.pow((t - 0.92) * 7, 2)) * c.depth * 0.45;
+            }
+            disp += Math.sin(v.x * 0.013) * Math.cos(v.y * 0.011) * Math.sin(v.z * 0.009) * 16
+                  + Math.sin(v.x * 0.05 + 1.3) * Math.cos(v.z * 0.043) * 5;
+            return playerState.planetRadius + disp;
+        }
+
+        // Drop the player just above the real terrain at the north pole.
+        function placePlayerAboveSurface(clearance = 2) {
+            const up = new THREE.Vector3(0, 1, 0);
+            dolly.position.copy(up).multiplyScalar(planetTerrainRadius(up) + playerState.height + clearance);
+            dolly.quaternion.identity();
+        }
+
+        // Mottled rocky surface for the Mars globe (no grid lines — those read as a floor).
+        function createPlanetTexture() {
+            const c = document.createElement('canvas'); c.width = c.height = 512;
+            const ctx = c.getContext('2d');
+            ctx.fillStyle = '#8B4513'; ctx.fillRect(0, 0, 512, 512);
+            for (let i = 0; i < 3000; i++) {
+                const x = Math.random() * 512, y = Math.random() * 512, r = Math.random() * 20 + 2;
+                ctx.fillStyle = Math.random() > 0.5
+                    ? `rgba(205,135,90,${0.05 + Math.random() * 0.13})`
+                    : `rgba(70,34,14,${0.05 + Math.random() * 0.16})`;
+                ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+            }
+            const tex = new THREE.CanvasTexture(c);
+            tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+            tex.repeat.set(26, 13);
+            return tex;
+        }
+
+        function createStarTexture() {
+            const c = document.createElement('canvas'); c.width = c.height = 64;
+            const ctx = c.getContext('2d');
+            const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+            g.addColorStop(0.0, 'rgba(255,255,255,1)');
+            g.addColorStop(0.35, 'rgba(255,255,255,0.75)');
+            g.addColorStop(0.7, 'rgba(255,255,255,0.15)');
+            g.addColorStop(1.0, 'rgba(255,255,255,0)');
+            ctx.fillStyle = g; ctx.beginPath(); ctx.arc(32, 32, 32, 0, Math.PI*2); ctx.fill();
+            const tex = new THREE.CanvasTexture(c);
+            return tex;
+        }
+
         function createStars() {
             const geometry = new THREE.BufferGeometry(); const vertices = [];
-            const spread = playerState.isPlanet ? 4000 : 3000;
-            const count = playerState.isPlanet ? 5000 : 3000;
+            // Stars live on a far shell well outside the planet: scattered through the
+            // volume they used to sit inside the globe and read as white squares drifting
+            // among the scenery.
+            const shell = playerState.planetRadius + 6000;
+            const count = 2500;
             for (let i = 0; i < count; i++) { 
-                vertices.push(THREE.MathUtils.randFloatSpread(spread)); 
-                vertices.push(THREE.MathUtils.randFloatSpread(spread)); 
-                vertices.push(THREE.MathUtils.randFloatSpread(spread)); 
+                const v = new THREE.Vector3(THREE.MathUtils.randFloatSpread(1), THREE.MathUtils.randFloatSpread(1), THREE.MathUtils.randFloatSpread(1))
+                    .normalize().multiplyScalar(shell + Math.random() * 6000);
+                vertices.push(v.x, v.y, v.z);
             }
             geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-            starSystem = new THREE.Points(geometry, new THREE.PointsMaterial({ color: 0xFFFFFF, size: 2.0 }));
+            starSystem = new THREE.Points(geometry, new THREE.PointsMaterial({
+                color: 0xFFFFFF, size: 2.4, sizeAttenuation: false,
+                map: createStarTexture(), transparent: true, alphaTest: 0.05,
+                depthWrite: false, fog: false
+            }));
             scene.add(starSystem);
         }
 
@@ -833,14 +903,41 @@
             }
         }
 
+        // Random point on a sphere of `radius`, within ~`arcDist` of `centerUp`.
+        // Used so planet content spawns near the player instead of across a whole globe.
+        function randomNearbySurfacePoint(centerUp, radius, arcDist) {
+            const up = centerUp.clone().normalize();
+            let t1 = new THREE.Vector3(1, 0, 0).cross(up);
+            if (t1.lengthSq() < 1e-4) t1 = new THREE.Vector3(0, 0, 1).cross(up);
+            t1.normalize();
+            const t2 = new THREE.Vector3().crossVectors(up, t1).normalize();
+            const theta = (Math.random() - 0.5) * 2 * (arcDist / radius);
+            const phi = Math.random() * Math.PI * 2;
+            return new THREE.Vector3()
+                .addScaledVector(up, Math.cos(theta))
+                .addScaledVector(t1, Math.sin(theta) * Math.cos(phi))
+                .addScaledVector(t2, Math.sin(theta) * Math.sin(phi))
+                .normalize().multiplyScalar(radius);
+        }
+
         function spawnCoins() {
             const coinGeo = new THREE.TorusGeometry(1, 0.3, 8, 24);
-            const coinMat = new THREE.MeshStandardMaterial({ color: 0xFFD700, metalness: 1, roughness: 0.1, emissive: 0x554400 });
+            const coinMat = new THREE.MeshStandardMaterial({ color: 0xFFD700, metalness: 1, roughness: 0.1, emissive: 0xFFAA00, emissiveIntensity: 0.5 });
+            const LOCAL_UP = new THREE.Vector3(0, 1, 0);
             for(let i=0; i<30; i++) {
                 const coin = new THREE.Mesh(coinGeo, coinMat); 
                 if (playerState.isPlanet) {
-                     const vec = new THREE.Vector3((Math.random()-0.5), (Math.random()-0.5), (Math.random()-0.5)).normalize().multiplyScalar(playerState.planetRadius + 20 + Math.random()*50);
-                     coin.position.copy(vec); coin.lookAt(0,0,0);
+                     // Rings hover above the terrain near the player and stand upright on the
+                     // local surface (torus plane contains the surface normal) so they read as
+                     // rings from any angle instead of thin slivers.
+                     const centerUp = dolly.position.clone().normalize();
+                     const radius = playerState.planetRadius + 25 + Math.random()*65;
+                     const point = randomNearbySurfacePoint(centerUp, radius, 120 + Math.random()*380);
+                     // keep the ring clear of the terrain underneath it
+                     point.setLength(planetTerrainRadius(point.clone().normalize()) + 22 + Math.random()*55);
+                     coin.position.copy(point);
+                     coin.scale.setScalar(2.2);   // rings read (and are hittable) at planet scale
+                     coin.quaternion.setFromUnitVectors(LOCAL_UP, point.clone().normalize());
                 } else {
                     coin.position.set((Math.random()-0.5)*500, 40 + Math.random()*40, (Math.random()-0.5)*500);
                 }
@@ -869,21 +966,26 @@
             while(coinsGroup.children.length > 0) coinsGroup.remove(coinsGroup.children[0]);
             while(propsGroup.children.length > 0) propsGroup.remove(propsGroup.children[0]);
             if(starSystem) scene.remove(starSystem);
+            if (sky) sky.visible = type !== 'mars';   // no atmosphere dome in space
             let buildingColors; let density = 150; let isNight = false;
             playerState.isPlanet = false;
             
             const rgbeLoader = new RGBELoader();
-            const loadEnv = (url) => {
+            const loadEnv = (url, useAsSky = true) => {
                 rgbeLoader.load(url, (texture) => {
                     const envMap = pmremGenerator.fromEquirectangular(texture).texture;
-                    scene.background = texture; scene.environment = envMap; texture.dispose();
+                    if (useAsSky) scene.background = texture;
+                    scene.environment = envMap;
+                    scene.environmentIntensity = useAsSky ? 1.0 : 0.45;
+                    if (!useAsSky) texture.dispose();
                 });
             };
             
             if (type === 'city') {
                  // Real World Mode - Daylight
                  loadEnv('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/kloofendal_48d_partly_cloudy_puresky_1k.hdr');
-                 scene.fog.color.setHex(0xaabbcc); scene.fog.far = 800; isNight = false;
+                 scene.fog.color.setHex(0xaabbcc); scene.fog.near = 0; scene.fog.far = 800; isNight = false;
+                 envFogColor = 0xaabbcc; envFogNear = 0; envFogFar = 800;
                  // Add specific floor for city
                  const floorGeo = new THREE.PlaneGeometry(5000, 5000); 
                  const floorMat = new THREE.MeshStandardMaterial({ map: createGroundTexture('city'), roughness: 1.0 });
@@ -896,36 +998,71 @@
             }
             else if (type === 'metro') { 
                 loadEnv('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/kloofendal_48d_partly_cloudy_puresky_1k.hdr');
-                scene.fog.color.setHex(0xaaaaaa); scene.fog.far = 500; isNight = false;
+                scene.fog.color.setHex(0xaaaaaa); scene.fog.near = 0; scene.fog.far = 500; isNight = false;
+                envFogColor = 0xaaaaaa; envFogNear = 0; envFogFar = 500;
                 buildingColors = [0xdddddd, 0xaaaaaa, 0x999999, 0xffffff];
             }
             else if (type === 'neon') { 
                 loadEnv('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/shanghai_bund_1k.hdr');
-                scene.fog.color.setHex(0x050510); scene.fog.far = 300; isNight = true; 
+                scene.fog.color.setHex(0x050510); scene.fog.near = 0; scene.fog.far = 300; isNight = true; 
+                envFogColor = 0x050510; envFogNear = 0; envFogFar = 300;
                 buildingColors = [0xff00ff, 0x00ffff, 0x3300aa, 0x111111];
             }
             else if (type === 'mars') { 
-                loadEnv('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/kloppenheim_02_puresky_1k.hdr');
-                scene.background = new THREE.Color(0x000000); scene.fog.color.setHex(0x8B4513); scene.fog.far = 2000; 
+                // Space backdrop: the HDR is used for material lighting only, so the sky
+                // stays black and the stars are actually visible.
+                loadEnv('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/kloppenheim_02_puresky_1k.hdr', false);
+                scene.background = new THREE.Color(0x05040a);
+                scene.fog.color.setHex(0x8B4513); scene.fog.near = 150; scene.fog.far = 5000; 
+                envFogColor = 0x8B4513; envFogNear = 150; envFogFar = 5000;
                 isNight = true; createStars(); playerState.isPlanet = true;
                 buildingColors = [0x8B4513, 0xA0522D, 0xCD853F];
             }
             
             let floor;
             if(type === 'mars') {
-                const floorGeo = new THREE.SphereGeometry(playerState.planetRadius, 128, 128);
+                // Denser mesh so craters actually read at ground level, plus vertex colours
+                // (darker floors / lighter rims) and a mottled surface texture.
+                const SEG = 256;
+                const floorGeo = new THREE.SphereGeometry(playerState.planetRadius, SEG, SEG);
                 const pos = floorGeo.attributes.position;
                 const craterCenters = [];
-                for(let i=0; i<20; i++) { craterCenters.push({ vec: new THREE.Vector3((Math.random()-0.5)*2, (Math.random()-0.5)*2, (Math.random()-0.5)*2).normalize().multiplyScalar(playerState.planetRadius), radius: 50 + Math.random() * 100 }); }
+                for(let i=0; i<26; i++) {
+                    craterCenters.push({
+                        vec: new THREE.Vector3((Math.random()-0.5)*2, (Math.random()-0.5)*2, (Math.random()-0.5)*2).normalize().multiplyScalar(playerState.planetRadius),
+                        radius: 60 + Math.random() * 190,
+                        depth: 40 + Math.random() * 70
+                    });
+                }
+                planetCraters = craterCenters;
                 const tempVec = new THREE.Vector3();
+                const colors = [];
+                const cBase = new THREE.Color(0x9c5a33), cDark = new THREE.Color(0x5c2d15), cLight = new THREE.Color(0xd08a5a);
                 for(let i=0; i<pos.count; i++){
                     tempVec.fromBufferAttribute(pos, i);
+                    let disp = 0;
                     for(let c of craterCenters) {
                         const dist = tempVec.distanceTo(c.vec);
-                        if(dist < c.radius) { const factor = Math.cos((dist / c.radius) * Math.PI * 0.5); tempVec.setLength(playerState.planetRadius - (factor * 30)); pos.setXYZ(i, tempVec.x, tempVec.y, tempVec.z); }
+                        const t = dist / c.radius;
+                        if(t < 1) {
+                            const bowl = -(1 - t * t) * c.depth;                       // concave floor
+                            const rim  =  Math.exp(-Math.pow((t - 0.92) * 7, 2)) * c.depth * 0.45; // raised rim
+                            disp += bowl + rim;
+                        }
                     }
+                    // gentle rolling noise so the ground isn't a perfect sphere
+                    const n = Math.sin(tempVec.x * 0.013) * Math.cos(tempVec.y * 0.011) * Math.sin(tempVec.z * 0.009) * 16
+                            + Math.sin(tempVec.x * 0.05 + 1.3) * Math.cos(tempVec.z * 0.043) * 5;
+                    const r = playerState.planetRadius + disp + n;
+                    tempVec.setLength(r);
+                    pos.setXYZ(i, tempVec.x, tempVec.y, tempVec.z);
+                    const k = THREE.MathUtils.clamp(disp / 110 + 0.45, 0, 1);
+                    const col = k < 0.45 ? cDark.clone().lerp(cBase, k / 0.45) : cBase.clone().lerp(cLight, (k - 0.45) / 0.55);
+                    colors.push(col.r, col.g, col.b);
                 }
-                const floorMat = new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 0.9 });
+                floorGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+                floorGeo.computeVertexNormals();
+                const floorMat = new THREE.MeshStandardMaterial({ map: createPlanetTexture(), roughness: 0.95, vertexColors: true });
                 floor = new THREE.Mesh(floorGeo, floorMat);
             } else {
                 const floorGeo = new THREE.PlaneGeometry(2000, 2000); 
@@ -957,7 +1094,7 @@
                     if (Math.abs(mesh.position.x) < 20 && Math.abs(mesh.position.z) < 20) continue;
                     cityGroup.add(mesh);
                 }
-                spawnProps(type); spawnCoins();
+                spawnProps(type);
             } else {
                 const boxGeo = new THREE.BoxGeometry(1,1,1);
                 for(let i=0; i<200; i++) {
@@ -968,6 +1105,9 @@
                     cityGroup.add(mesh);
                 }
             }
+            // Coins are collected in every environment (this used to run only for the
+            // flat city levels, so Mars had no coins at all).
+            spawnCoins();
             spawnEnemies(50, playerState.planetRadius, playerState.isPlanet);
         }
 
@@ -1027,7 +1167,7 @@
             const playerPos = dolly.position.clone();
             for(let i=coinsGroup.children.length-1; i>=0; i--) {
                 const c = coinsGroup.children[i];
-                c.rotation.y += 2 * dt;
+                c.rotateY(2 * dt);   // local axis, so planet rings spin about their own normal
                 if (playerPos.distanceTo(c.position) < 5) {
                     coinsGroup.remove(c);
                     coins++;
@@ -1064,11 +1204,12 @@
             if (time < playerState.invulnerableUntil) {
                 const flashIntensity = (Math.sin(time * 20) * 0.5 + 0.5) * 0.8;
                 scene.fog.color.setRGB(1, 0.2 + flashIntensity * 0.3, 0.2 + flashIntensity * 0.3);
-                scene.fog.density = 0.08 + flashIntensity * 0.06;
             } else {
-                // Reset fog per environment (approximate)
-                scene.fog.density = playerState.isPlanet ? 0.001 : 0.002;
-                scene.fog.color.setHex(playerState.isPlanet ? 0x8B4513 : 0x87CEEB);
+                // Restore this environment's fog. THREE.Fog has no density, and hard-coding
+                // sky blue here used to wash out Neon and Mars after taking a hit.
+                scene.fog.color.setHex(envFogColor);
+                scene.fog.near = envFogNear;
+                scene.fog.far = envFogFar;
             }
         
             // 2. Projectiles & Enemies (Current Logic)
@@ -1124,7 +1265,7 @@
                 const planetCenter = new THREE.Vector3(0,0,0);
                 const dist = dolly.position.distanceTo(planetCenter);
                 if (dist < 1) { 
-                    dolly.position.set(0, playerState.planetRadius + 10, 0); 
+                    placePlayerAboveSurface(2);
                     // *** NEW: TELEPORT DAMAGE ***
                     if (time > playerState.invulnerableUntil) {
                         playerState.health--;
@@ -1143,14 +1284,19 @@
                 const gravity = up.clone().negate().multiplyScalar(9.8 * dt);
                 playerState.velocity.add(gravity);
                 playerState.velocity.multiplyScalar(1 - (2.0 * dt)); 
-                const surfaceHeight = playerState.planetRadius + playerState.height;
+                const surfaceHeight = planetTerrainRadius(up) + playerState.height;
                 if (dist < surfaceHeight) {
-                    dolly.position.copy(up.multiplyScalar(surfaceHeight));
+                    // NOTE: `up` must stay a unit vector — scaling it in place here used to
+                    // corrupt the velocity projection below and the surface-alignment
+                    // quaternion, launching the player into space on every touchdown.
+                    dolly.position.copy(up).multiplyScalar(surfaceHeight);
                     const vDotNormal = playerState.velocity.dot(up);
                     if (vDotNormal < 0) { 
-                        playerState.velocity.sub(up.multiplyScalar(vDotNormal));
-                        // *** NEW: PLANET SURFACE CRASH DAMAGE ***
-                        if (time > playerState.invulnerableUntil) {
+                        playerState.velocity.addScaledVector(up, -vDotNormal);
+                        // *** PLANET SURFACE CRASH DAMAGE ***
+                        // Only a hard touchdown hurts — grazing the ground used to always
+                        // cost 1 HP, so every landing (and every arrival) was a wound.
+                        if (-vDotNormal > 8 && time > playerState.invulnerableUntil) {
                             playerState.health--;
                             if (crashSound.isPlaying) crashSound.stop();
                             crashSound.play();
@@ -1300,8 +1446,16 @@
                 }
         
                 // TURNING: Right joystick (axes[2])
+                // Yaw about the player's LOCAL up axis (post-multiply). Writing
+                // dolly.rotation.y yaws about world +Y, which is the wrong axis on a
+                // spherical planet: it stops working at the equator and reverses in
+                // the southern hemisphere. On flat levels local up == world +Y, so
+                // the feel there is unchanged.
                 if (Math.abs(gp.axes[2]) > 0.15) {
-                    dolly.rotation.y -= gp.axes[2] * 2 * dt;
+                    const yaw = new THREE.Quaternion().setFromAxisAngle(
+                        new THREE.Vector3(0, 1, 0), -gp.axes[2] * 2 * dt
+                    );
+                    dolly.quaternion.multiply(yaw);
                 }
         
                 // THRUST: Triggers (index 0)
@@ -1462,7 +1616,7 @@
             
             // Reset player position
             if (playerState.isPlanet) {
-                 dolly.position.set(0, playerState.planetRadius + 10, 0);
+                 placePlayerAboveSurface(2);
             } else {
                  dolly.position.set(0,0,0);
             }
@@ -1508,10 +1662,11 @@
         };
         
         window.switchLocation = function(type) {
-            generateCity(type);
             playerState.velocity.set(0,0,0);
+            // Place the player BEFORE building the world — planet content (rings, drones)
+            // anchors to the spawn point, so the level actually has things to fly at.
             if (type === 'mars') {
-                dolly.position.set(0, playerState.planetRadius + 10, 0);
+                dolly.position.set(0, playerState.planetRadius + playerState.height + 1, 0);
                 dolly.rotation.set(0,0,0);
                 dolly.quaternion.identity();
             } else {
@@ -1520,6 +1675,8 @@
                 dolly.rotation.set(0,0,0);
                 dolly.quaternion.identity();
             }
+            generateCity(type);
+            if (type === 'mars') placePlayerAboveSurface(2);
         };
 
         function processOSMData(data, originLon, originLat) {

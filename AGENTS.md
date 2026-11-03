@@ -18,6 +18,20 @@ depends on the concept, even though the code is not shared.
 - **Planet** — globe-scale terrain
 - **Real world** — generated from OpenStreetMap data
 
+## Spherical planet (Mars) — invariants to preserve
+
+Two things break the level if changed naively:
+
+1. **Yaw must use the player's local up axis**, i.e. `dolly.quaternion.multiply(yawQuat)` in
+   `handleFlightInput`. Writing `dolly.rotation.y` yaws about *world* +Y: it is correct only at the
+   north pole, loses authority at the equator and reverses in the southern hemisphere.
+2. **Ground collision uses `planetTerrainRadius(dir)`**, the analytic crater+noise height, because
+   the sphere mesh in `generateCity('mars')` is displaced. If you change the displacement formula,
+   change `planetTerrainRadius` identically or the player clips through hills.
+
+Content anchors to `dolly.position` at build time — `switchLocation()` places the player before
+`generateCity()` so rings and drones spawn near the spawn point instead of across the whole globe.
+
 ## Deployment
 Static site on GitHub Pages. Local dev server runs on port `5500`.
 
